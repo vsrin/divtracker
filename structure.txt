@@ -1,0 +1,119 @@
+dividend-dashboard/
+  README.md
+  create_placehoder.sh
+  data/
+    Portfolio_Positions_May-13-2025.csv
+  package-lock.json
+  package.json
+  print_folder.sh
+  public/
+    darkMode.js
+    favicon.ico
+    index.html
+    logo192.png
+    logo512.png
+    manifest.json
+    robots.txt
+  server/
+    config/
+      db.js [empty]
+    controllers/
+      dividendController.js [empty]
+      fileController.js [empty]
+      portfolioController.js [empty]
+      transactionController.js [empty]
+    index.js
+    models/
+      Dividend.js [empty]
+      Holding.js [empty]
+      Portfolio.js [empty]
+      Transaction.js [empty]
+    routes/
+      dividends.js [empty]
+      files.js [empty]
+      portfolio.js [empty]
+      transactions.js [empty]
+    utils/
+      calculations.js [empty]
+      csvParser.js [empty]
+  src/
+    App.css
+    App.test.tsx
+    App.tsx
+    api/
+      dividends.ts
+      fileUpload.ts
+      portfolio.ts
+      transactions.ts
+    components/
+      charts/
+        AllocationChart.tsx
+        GrowthLineChart.tsx
+        IncomeBarChart.tsx
+        ProjectionChart.tsx
+        YieldChart.tsx
+      dashboard/
+        AssetAllocation.tsx
+        DividendProjection.tsx
+        MonthlyIncome.tsx
+        PerformanceMetrics.tsx
+        PortfolioSummary.tsx
+        TopHoldings.tsx
+      forms/
+        FilterForm.tsx
+        ImportForm.tsx
+        MongoDBSettings.tsx
+        SettingsForm.tsx
+        TransactionImport.tsx
+      layout/
+        Dashboard.tsx
+        Header.tsx
+        Main.tsx
+        Sidebar.tsx
+      tables/
+        DividendTable.tsx
+        HoldingsTable.tsx
+        TransactionTable.tsx
+      ui/
+        Alert.tsx
+        Button.tsx
+        Card.tsx
+        Dropdown.tsx
+        Modal.tsx
+    context/
+      FiltersContext.tsx
+      MongoDBContext.tsx
+      PortfolioContext.tsx
+      ThemeContext.tsx
+    data/ [empty]
+    hooks/
+      useDividends.ts
+      useFileUpload.ts
+      useMongoDB.ts
+      usePortfolio.ts
+    index.css
+    index.tsx
+    logo.svg
+    reportWebVitals.ts
+    setupTests.ts
+    styles/
+      tailwind.css
+    types/
+      dividend.ts
+      index.ts
+      portfolio.ts
+      transaction.ts
+    utils/
+      calculations.ts
+      claudeParser.ts
+      csvDetector.ts
+      csvParser.ts
+      dateUtils.ts
+      formatters.ts
+      historicalDataImporter.ts
+      mongoDBService.ts
+      openaiParser.ts
+      transactionParser.ts
+  structure.txt
+  tailwind.config.js
+  tsconfig.json

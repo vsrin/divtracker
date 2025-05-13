@@ -1,0 +1,181 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+/* Custom theme colors */
+:root {
+  --color-primary-50: 239 246 255;
+  --color-primary-100: 219 234 254;
+  --color-primary-200: 191 219 254;
+  --color-primary-300: 147 197 253;
+  --color-primary-400: 96 165 250;
+  --color-primary-500: 59 130 246;
+  --color-primary-600: 37 99 235;
+  --color-primary-700: 29 78 216;
+  --color-primary-800: 30 64 175;
+  --color-primary-900: 30 58 138;
+  
+  --color-secondary-50: 245 243 255;
+  --color-secondary-100: 237 233 254;
+  --color-secondary-200: 221 214 254;
+  --color-secondary-300: 196 181 253;
+  --color-secondary-400: 167 139 250;
+  --color-secondary-500: 139 92 246;
+  --color-secondary-600: 124 58 237;
+  --color-secondary-700: 109 40 217;
+  --color-secondary-800: 91 33 182;
+  --color-secondary-900: 76 29 149;
+}
+
+/* Apply dark mode based on class */
+.dark {
+  color-scheme: dark;
+}
+
+/* Body styles */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  @apply bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+}
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-gray-200 dark:bg-gray-800;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-gray-400 dark:bg-gray-600 rounded;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-gray-500 dark:bg-gray-500;
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  .text-xs {
+    font-size: 0.7rem;
+  }
+  
+  .text-sm {
+    font-size: 0.8rem;
+  }
+  
+  .p-4 {
+    padding: 0.875rem;
+  }
+}
+
+/* Chart styles */
+.recharts-responsive-container {
+  @apply rounded-lg overflow-hidden;
+}
+
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  @apply stroke-gray-300 dark:stroke-gray-700;
+}
+
+.recharts-text {
+  @apply fill-gray-600 dark:fill-gray-400;
+}
+
+.recharts-tooltip-wrapper {
+  @apply !shadow-lg;
+}
+
+.recharts-default-tooltip {
+  @apply !bg-white dark:!bg-gray-800 !border-gray-200 dark:!border-gray-700 !shadow-lg !px-3 !py-2;
+}
+
+.recharts-tooltip-label {
+  @apply !text-gray-700 dark:!text-gray-300 !font-medium;
+}
+
+.recharts-tooltip-item-list {
+  @apply !mt-1;
+}
+
+.recharts-tooltip-item {
+  @apply !text-sm;
+}
+
+/* Initialize dark mode based on localStorage or system preference */
+:root {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+  }
+  
+  body {
+    @apply dark:bg-gray-900 dark:text-gray-100;
+  }
+}
+
+/* Apply dark mode class dynamically from JavaScript */
+.dark {
+  color-scheme: dark;
+}
+
+/* Transition effects */
+.transition-theme {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Helper classes */
+.symbol {
+  @apply font-mono;
+}
+
+.bg-overlay {
+  @apply bg-opacity-50 dark:bg-opacity-50;
+}
+
+/* Force dark theme on specific elements */
+.asset-chart text {
+  @apply dark:fill-gray-300;
+}
+
+/* Custom table styles */
+.table-container {
+  @apply overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700;
+}
+
+.data-table {
+  @apply min-w-full divide-y divide-gray-200 dark:divide-gray-700;
+}
+
+.data-table th {
+  @apply px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider bg-gray-50 dark:bg-gray-800;
+}
+
+.data-table td {
+  @apply px-4 py-3 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300;
+}
+
+.data-table tr {
+  @apply bg-white dark:bg-gray-800;
+}
+
+.data-table tr:nth-child(even) {
+  @apply bg-gray-50 dark:bg-gray-700;
+}
+
+.data-table tr:hover {
+  @apply bg-gray-100 dark:bg-gray-600;
+}
+
+/* Applied to dynamically initialize dark mode */
+script {
+  display: none;
+}
