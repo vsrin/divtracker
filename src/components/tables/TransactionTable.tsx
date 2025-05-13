@@ -1,8 +1,12 @@
+// src/components/tables/TransactionTable.tsx 
+// Add the correct type imports and fix the type annotations
+
 import React, { useState, useEffect } from 'react';
 import usePortfolio from '../../hooks/usePortfolio';
 import Card from '../ui/Card';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { filterTransactionsByDate } from '../../utils/calculations';
+import { Transaction } from '../../types';
 
 interface SortableHeaderProps {
   field: string;
@@ -10,21 +14,6 @@ interface SortableHeaderProps {
   currentDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
   children: React.ReactNode;
-}
-
-interface Transaction {
-  id: string;
-  date: string;
-  type: string;
-  symbol: string;
-  companyName: string;
-  shares: number;
-  price: number;
-  amount: number;
-  fees?: number;
-  tax?: number;
-  currency: string;
-  notes?: string;
 }
 
 const SortableHeader: React.FC<SortableHeaderProps> = ({ 
@@ -88,11 +77,11 @@ const TransactionTable: React.FC = () => {
     
     // Filter by transaction type
     if (typeFilter !== 'all') {
-      filtered = filtered.filter(t => t.type.toLowerCase() === typeFilter.toLowerCase());
+      filtered = filtered.filter((t: Transaction) => t.type.toLowerCase() === typeFilter.toLowerCase());
     }
     
     // Sort transactions
-    filtered.sort((a, b) => {
+    filtered.sort((a: Transaction, b: Transaction) => {
       let comparison = 0;
       
       switch (sortField) {

@@ -18,8 +18,19 @@ import ImportForm from './components/forms/ImportForm';
 import TransactionImport from './components/forms/TransactionImport';
 import SettingsForm from './components/forms/SettingsForm';
 
+// Import the PortfolioProvider
+import { PortfolioProvider } from './context/PortfolioContext';
+
+// Import the data migration utility
+import { runStartupDataMigration } from './utils/dataMigration';
+
 function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Run data migration on startup to ensure all data is in sync
+  useEffect(() => {
+    runStartupDataMigration();
+  }, []);
 
   // Load theme from localStorage or system preference
   useEffect(() => {
@@ -38,39 +49,42 @@ function App() {
 
   return (
     <Router>
-      <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
-        {/* Sidebar */}
-        <Sidebar open={sidebarOpen} onToggle={toggleSidebar} />
-        
-        {/* Main Content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Header */}
-          <Header onToggleSidebar={toggleSidebar} />
+      {/* Wrap the entire app with PortfolioProvider */}
+      <PortfolioProvider>
+        <div className="flex h-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
+          {/* Sidebar */}
+          <Sidebar open={sidebarOpen} onToggle={toggleSidebar} />
           
-          {/* Main Content Area */}
-          <main className="flex-1 overflow-y-auto p-4">
-            <div className="container mx-auto">
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/summary" element={<PortfolioSummary />} />
-                <Route path="/holdings" element={<HoldingsTable />} />
-                <Route path="/dividends" element={<DividendTable />} />
-                <Route path="/transactions" element={<TransactionTable />} />
-                <Route path="/import" element={<ImportForm />} />
-                <Route path="/import/transactions" element={<TransactionImport />} />
-                <Route path="/settings" element={<SettingsForm />} />
-              </Routes>
-            </div>
-          </main>
-          
-          {/* Footer */}
-          <footer className="bg-white dark:bg-gray-800 p-4 shadow-inner">
-            <div className="container mx-auto text-center text-sm text-gray-500 dark:text-gray-400">
-              Dividend Dashboard &copy; 2025
-            </div>
-          </footer>
+          {/* Main Content */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Header */}
+            <Header onToggleSidebar={toggleSidebar} />
+            
+            {/* Main Content Area */}
+            <main className="flex-1 overflow-y-auto p-4">
+              <div className="container mx-auto">
+                <Routes>
+                  <Route path="/" element={<Dashboard />} />
+                  <Route path="/summary" element={<PortfolioSummary />} />
+                  <Route path="/holdings" element={<HoldingsTable />} />
+                  <Route path="/dividends" element={<DividendTable />} />
+                  <Route path="/transactions" element={<TransactionTable />} />
+                  <Route path="/import" element={<ImportForm />} />
+                  <Route path="/import/transactions" element={<TransactionImport />} />
+                  <Route path="/settings" element={<SettingsForm />} />
+                </Routes>
+              </div>
+            </main>
+            
+            {/* Footer */}
+            <footer className="bg-white dark:bg-gray-800 p-4 shadow-inner">
+              <div className="container mx-auto text-center text-sm text-gray-500 dark:text-gray-400">
+                Dividend Dashboard &copy; 2025
+              </div>
+            </footer>
+          </div>
         </div>
-      </div>
+      </PortfolioProvider>
     </Router>
   );
 }

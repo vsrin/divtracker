@@ -1,17 +1,12 @@
-// src/components/dashboard/AssetAllocation.tsx - Fix issues
+// src/components/dashboard/AssetAllocation.tsx
+// Fixed version with proper type handling and unused import removal
+
 import React, { useMemo } from 'react';
 import { usePortfolioContext } from '../../context/PortfolioContext';
-import { Holding } from '../../types/portfolio';
 import Card from '../ui/Card';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 import { formatCurrency, formatPercentage } from '../../utils/formatters';
-
-interface AssetBreakdown {
-  assetClass: string;
-  value: number;
-  allocation: number;
-  color: string;
-}
+import { AssetAllocation as AssetAllocationInterface } from '../../types';
 
 const AssetAllocation: React.FC = () => {
   const { holdings, isLoading } = usePortfolioContext();
@@ -26,7 +21,7 @@ const AssetAllocation: React.FC = () => {
     const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
     
     // Collect unique asset classes
-    const assetClasses: Record<string, AssetBreakdown> = {};
+    const assetClasses: Record<string, AssetAllocationInterface> = {};
     
     // Group by asset class
     holdings.forEach(holding => {

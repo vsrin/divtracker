@@ -142,7 +142,17 @@ import {
         
         // Parse the CSV file
         const parseResult = await detectAndParseCSV(file);
-        const { holdings, dividends, transactions, fileType } = parseResult;
+        const { success, error } = parseResult;
+        
+        if (!success || error) {
+          throw new Error(error || "Failed to parse CSV file");
+        }
+        
+        // Initialize with empty arrays to prevent undefined errors
+        const holdings = parseResult.holdings || [];
+        const dividends = parseResult.dividends || [];
+        const transactions = parseResult.transactions || [];
+        const fileType = parseResult.fileType;
         
         // Ensure fileType is valid
         const validFileType: 'positions' | 'transactions' = 

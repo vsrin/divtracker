@@ -1,45 +1,27 @@
 // src/hooks/usePortfolio.ts
 
-import { useState, useEffect } from 'react';
-import { 
-  Holding, 
-  DividendPayment, 
-  Transaction 
-} from '../types';
-import { calculateDividendProjections } from '../utils/calculations';
+import { useEffect, useState } from 'react';
+import { usePortfolioContext } from '../context/PortfolioContext';
+import { DividendPayment, Holding, Transaction } from '../types';
+import { calculateDividendProjections, recalculateHoldings } from '../utils/calculations';
 
 /**
- * Helper function to merge arrays by ID while avoiding duplicates
- */
-function mergeArraysById<T extends { id: string }>(
-  existingArray: T[],
-  newArray: T[]
-): T[] {
-  const merged: Record<string, T> = {};
-  
-  // Add existing items to the map
-  existingArray.forEach(item => {
-    merged[item.id] = item;
-  });
-  
-  // Add new items, overwriting existing ones with same ID
-  newArray.forEach(item => {
-    merged[item.id] = item;
-  });
-  
-  // Convert back to array
-  return Object.values(merged);
-}
-
-/**
- * Custom hook for managing portfolio data
+ * Custom hook for accessing portfolio data from the PortfolioContext
+ * and calculating derived state
  */
 const usePortfolio = () => {
-  const [holdings, setHoldings] = useState<Holding[]>([]);
+  const { 
+    holdings, 
+    transactions, 
+    isLoading, 
+    error, 
+    setHoldings, 
+    setTransactions, 
+    clearData 
+  } = usePortfolioContext();
+  
+  // Dividend state
   const [dividends, setDividends] = useState<DividendPayment[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   
   // Portfolio summary data
   const [portfolioValue, setPortfolioValue] = useState(0);
@@ -47,33 +29,16 @@ const usePortfolio = () => {
   const [portfolioYield, setPortfolioYield] = useState(0);
   const [monthlyIncome, setMonthlyIncome] = useState<{month: string; total: number}[]>([]);
   
-  // Load portfolio data from localStorage
+  // Load dividend data from localStorage
   useEffect(() => {
     try {
-      setIsLoading(true);
-      setError(null);
-      
-      // Load data from localStorage
-      const holdingsStr = localStorage.getItem('portfolio-holdings');
       const dividendsStr = localStorage.getItem('portfolio-dividends');
-      const transactionsStr = localStorage.getItem('portfolio-transactions');
-      
-      if (holdingsStr) {
-        setHoldings(JSON.parse(holdingsStr));
-      }
       
       if (dividendsStr) {
         setDividends(JSON.parse(dividendsStr));
       }
-      
-      if (transactionsStr) {
-        setTransactions(JSON.parse(transactionsStr));
-      }
     } catch (err) {
-      setError(`Error loading portfolio data: ${err instanceof Error ? err.message : String(err)}`);
-      console.error('Portfolio data loading error:', err);
-    } finally {
-      setIsLoading(false);
+      console.error('Dividend data loading error:', err);
     }
   }, []);
   
@@ -104,41 +69,79 @@ const usePortfolio = () => {
     }
   }, [holdings, dividends]);
   
-  // Add new holdings
-  const addHoldings = (newHoldings: Holding[]) => {
-    setHoldings(prevHoldings => {
-      const merged = mergeArraysById(prevHoldings, newHoldings);
-      localStorage.setItem('portfolio-holdings', JSON.stringify(merged));
-      return merged;
-    });
-  };
+  // Auto-recalculate holdings when transactions or dividends change
+  useEffect(() => {
+    if (transactions.length > 0) {
+      const calculatedHoldings = recalculateHoldings(transactions, dividends);
+      
+      // Only update holdings if we have calculated values and they're different
+      if (calculatedHoldings.length > 0 && 
+          (holdings.length === 0 || 
+           JSON.stringify(calculatedHoldings) !== JSON.stringify(holdings))) {
+        console.log('Recalculated holdings from transactions:', calculatedHoldings.length);
+        setHoldings(calculatedHoldings);
+      }
+    }
+  }, [transactions, dividends, setHoldings, holdings]);
   
   // Add new dividends
   const addDividends = (newDividends: DividendPayment[]) => {
     setDividends(prevDividends => {
-      const merged = mergeArraysById(prevDividends, newDividends);
+      // Merge by ID
+      const dividendMap = new Map();
+      [...prevDividends, ...newDividends].forEach(item => {
+        dividendMap.set(item.id, item);
+      });
+      
+      const merged = Array.from(dividendMap.values());
       localStorage.setItem('portfolio-dividends', JSON.stringify(merged));
       return merged;
     });
   };
   
-  // Add new transactions
-  const addTransactions = (newTransactions: Transaction[]) => {
-    setTransactions(prevTransactions => {
-      const merged = mergeArraysById(prevTransactions, newTransactions);
-      localStorage.setItem('portfolio-transactions', JSON.stringify(merged));
-      return merged;
+  // Add new holdings (update the PortfolioContext)
+  const addHoldings = (newHoldings: Holding[]) => {
+    // Merge by ID
+    const holdingMap = new Map();
+    [...holdings, ...newHoldings].forEach(item => {
+      holdingMap.set(item.id, item);
     });
+    
+    const merged = Array.from(holdingMap.values());
+    setHoldings(merged);
+  };
+  
+  // Add new transactions (update the PortfolioContext and recalculate holdings)
+  const addTransactions = (newTransactions: Transaction[]) => {
+    // Merge by ID
+    const transactionMap = new Map();
+    [...transactions, ...newTransactions].forEach(item => {
+      transactionMap.set(item.id, item);
+    });
+    
+    const merged = Array.from(transactionMap.values());
+    setTransactions(merged);
+    
+    // The holdings will be recalculated by the useEffect above
   };
   
   // Clear all portfolio data
   const clearPortfolioData = () => {
-    localStorage.removeItem('portfolio-holdings');
+    clearData(); // Clear context data
     localStorage.removeItem('portfolio-dividends');
-    localStorage.removeItem('portfolio-transactions');
-    setHoldings([]);
     setDividends([]);
-    setTransactions([]);
+  };
+  
+  // Force recalculation of holdings
+  const recalculateAllHoldings = () => {
+    if (transactions.length > 0) {
+      const calculatedHoldings = recalculateHoldings(transactions, dividends);
+      if (calculatedHoldings.length > 0) {
+        setHoldings(calculatedHoldings);
+        return true;
+      }
+    }
+    return false;
   };
   
   return {
@@ -155,7 +158,8 @@ const usePortfolio = () => {
     addHoldings,
     addDividends,
     addTransactions,
-    clearPortfolioData
+    clearPortfolioData,
+    recalculateAllHoldings
   };
 };
 

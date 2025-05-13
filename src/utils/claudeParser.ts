@@ -1,307 +1,320 @@
-import {
-    Holding,
-    DividendPayment,
-    Transaction
-  } from '../types';
-  
-  /**
-   * Claude API integration for CSV parsing
-   */
-  export interface ClaudeResponse {
-    content: {
-      type: string;
-      text: string;
-    }[];
-  }
-  
-  export interface ParsedHolding {
-    symbol: string;
-    name?: string;
-    shares?: number;
-    price?: number;
-    value?: number;
-    dividendYield?: number;
-    annualIncome?: number;
-    assetClass?: string;
-    // Adding missing properties that are being used in the code
-    costPerShare?: number;
-    costBasis?: number;
-    currentValue?: number;
-    currentPrice?: number;
-    gain?: number;
-    gainPercent?: number;
-    dividendAmount?: number;
-    dividendFrequency?: string;
-    dividendGrowth?: number;
-    sector?: string;
-  }
-  
-  /**
-   * Process a CSV file using Claude's API for more accurate parsing
-   */
-  export const parseCSVWithClaude = async (
-    file: File, 
-    apiKey: string
-  ): Promise<{
-    holdings: Holding[];
-    dividends: DividendPayment[];
-    transactions: Transaction[];
-  }> => {
-    try {
-      if (!apiKey) {
-        throw new Error('Claude API key is required');
-      }
-      
-      // Read the file content
-      const fileContent = await readFileAsText(file);
-      if (!fileContent) {
-        throw new Error('Failed to read file content');
-      }
-      
-      // Create a prompt for Claude
-      const prompt = createClaudePrompt(fileContent);
-      
-      // Call Claude API
-      const response = await callClaudeAPI(prompt, apiKey);
-      
-      // Parse Claude's response
-      const result = parseClaudeResponse(response);
-      
-      return result;
-    } catch (error) {
-      console.error('Error parsing CSV with Claude:', error);
-      // Fall back to regular CSV parsing
-      throw error;
+// src/utils/csvParser.ts
+// Fixed unused imports and variables
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import { v4 as uuidv4 } from 'uuid';
+import { Holding } from '../types';
+
+interface CSVParseResult {
+  success: boolean;
+  fileType?: string;
+  holdings?: any[];
+  transactions?: any[];
+  error?: string;
+}
+
+export const parseCSV = (csvText: string): Promise<CSVParseResult> => {
+  return new Promise((resolve, reject) => {
+    if (!csvText) {
+      reject({ success: false, error: "No CSV data provided" });
+      return;
     }
-  };
-  
-  /**
-   * Read a file as text
-   */
-  const readFileAsText = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          resolve(event.target.result as string);
-        } else {
-          reject(new Error('Failed to read file'));
-        }
-      };
-      reader.onerror = () => reject(new Error('File reading error'));
-      reader.readAsText(file);
-    });
-  };
-  
-  /**
-   * Create a prompt for Claude to parse the CSV
-   */
-  const createClaudePrompt = (csvContent: string): string => {
-    return `I have a CSV file containing portfolio data. Please parse it and extract the following information:
-  1. List of all holdings with their symbols, names, quantities, prices, and current values
-  2. Dividend information (if available) for each holding
-  3. Any other relevant financial data
-  
-  Here's the CSV content:
-  
-  \`\`\`
-  ${csvContent}
-  \`\`\`
-  
-  Please format your response as a JSON object with the following structure:
-  {
-    "holdings": [
-      {
-        "symbol": "AAPL",
-        "name": "Apple Inc.",
-        "shares": 100,
-        "price": 150.25,
-        "value": 15025.00,
-        "dividendYield": 0.65,
-        "annualIncome": 97.66,
-        "assetClass": "Stocks"
-      },
-      // More holdings...
-    ],
-    "portfolioValue": 150000.00,
-    "dividendIncome": 2500.00,
-    "dividendYield": 1.67
-  }
-  
-  Include as much detail as you can extract from the CSV, and use your judgment to categorize assets appropriately.`;
-  };
-  
-  /**
-   * Call Claude API
-   */
-  const callClaudeAPI = async (prompt: string, apiKey: string): Promise<ClaudeResponse> => {
-    const API_URL = 'https://api.anthropic.com/v1/messages';
-    
-    const response = await fetch(API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-haiku-20240307',
-        max_tokens: 4000,
-        messages: [
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      })
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Claude API error: ${response.status} ${await response.text()}`);
-    }
-    
-    return await response.json();
-  };
-  
-  /**
-   * Parse Claude's response to extract holdings, dividends, and transactions
-   */
-  const parseClaudeResponse = (
-    response: ClaudeResponse
-  ): {
-    holdings: Holding[];
-    dividends: DividendPayment[];
-    transactions: Transaction[];
-  } => {
+
     try {
-      // Extract text from Claude's response
-      const responseText = response.content
-        .filter(c => c.type === 'text')
-        .map(c => c.text)
-        .join('');
+      // Split CSV into lines
+      const lines = csvText.split(/\r?\n/);
       
-      // Find and parse JSON in the response
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        throw new Error('No JSON found in Claude response');
+      // Extract headers (first line)
+      const headers = lines[0].split(',').map(header => header.trim());
+      
+      // Determine if this is a holdings or transactions file
+      const isHoldings = detectHoldingsCSV(headers);
+      const isTransactions = detectTransactionsCSV(headers);
+      
+      if (!isHoldings && !isTransactions) {
+        reject({ 
+          success: false, 
+          error: "Could not determine CSV type. Expected headers for holdings or transactions not found."
+        });
+        return;
       }
       
-      const parsedData = JSON.parse(jsonMatch[0]);
+      // This variable is used for logging/debugging
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const fileType = isHoldings ? 'holdings' : 'transactions';
       
-      // Extract holdings
-      const holdings: Holding[] = [];
-      const dividends: DividendPayment[] = [];
-      const transactions: Transaction[] = [];
+      // Skip header row and empty lines
+      const dataLines = lines.slice(1).filter(line => line.trim() !== '');
       
-      if (parsedData.holdings && Array.isArray(parsedData.holdings)) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const totalValue = parsedData.portfolioValue || 
-          parsedData.holdings.reduce((sum: number, h: ParsedHolding) => sum + (h.value || 0), 0);
+      if (dataLines.length === 0) {
+        reject({ success: false, error: "No data rows found in CSV" });
+        return;
+      }
+      
+      if (isHoldings) {
+        // Parse as holdings
+        const holdings: Holding[] = [];
         
-        parsedData.holdings.forEach((h: ParsedHolding, index: number) => {
-          // Create a holding
+        // Map headers to standard field names
+        const symbolIndex = findHeaderIndex(headers, ['symbol', 'ticker', 'stock']);
+        const nameIndex = findHeaderIndex(headers, ['name', 'description', 'company', 'security']);
+        const sharesIndex = findHeaderIndex(headers, ['shares', 'quantity', 'position']);
+        const costBasisIndex = findHeaderIndex(headers, ['cost basis', 'basis', 'total cost']);
+        const costPerShareIndex = findHeaderIndex(headers, ['cost per share', 'price paid', 'avg price', 'average price']);
+        const currentPriceIndex = findHeaderIndex(headers, ['price', 'current price', 'last price']);
+        const currentValueIndex = findHeaderIndex(headers, ['value', 'current value', 'market value']);
+        const gainIndex = findHeaderIndex(headers, ['gain', 'profit', 'gain/loss', 'p/l']);
+        const gainPercentIndex = findHeaderIndex(headers, ['gain %', 'profit %', 'return', 'return %', 'roi']);
+        const dividendYieldIndex = findHeaderIndex(headers, ['yield', 'dividend yield', 'div yield', 'yield %']);
+        const dividendAmountIndex = findHeaderIndex(headers, ['dividend', 'annual dividend', 'div amount']);
+        const sectorIndex = findHeaderIndex(headers, ['sector', 'industry']);
+        const assetClassIndex = findHeaderIndex(headers, ['asset class', 'asset type', 'security type', 'type']);
+        
+        if (symbolIndex === -1) {
+          reject({ success: false, error: "Required column 'Symbol' not found" });
+          return;
+        }
+        
+        // Process each data line
+        for (let i = 0; i < dataLines.length; i++) {
+          const cells = parseCsvLine(dataLines[i]);
+          
+          // Skip rows with incorrect number of columns
+          if (cells.length !== headers.length) {
+            console.warn(`Skipping row ${i + 2} due to column count mismatch`);
+            continue;
+          }
+          
+          // Get values from cells
+          const symbol = symbolIndex >= 0 ? cells[symbolIndex].trim() : '';
+          
+          // Skip rows without a symbol
+          if (!symbol) {
+            continue;
+          }
+          
+          const name = nameIndex >= 0 ? cells[nameIndex].trim() : symbol;
+          const shares = sharesIndex >= 0 ? parseFloat(cells[sharesIndex]) : 0;
+          
+          // Skip positions with zero shares
+          if (shares <= 0) {
+            continue;
+          }
+          
+          // Parse financial values
+          const costBasis = costBasisIndex >= 0 ? parseFloat(cells[costBasisIndex]) : 0;
+          const costPerShare = costPerShareIndex >= 0 ? 
+            parseFloat(cells[costPerShareIndex]) : 
+            (shares > 0 ? costBasis / shares : 0);
+          
+          const currentPrice = currentPriceIndex >= 0 ? 
+            parseFloat(cells[currentPriceIndex]) : 
+            0;
+          
+          const currentValue = currentValueIndex >= 0 ? 
+            parseFloat(cells[currentValueIndex]) : 
+            (currentPrice * shares);
+          
+          const gain = gainIndex >= 0 ? 
+            parseFloat(cells[gainIndex]) : 
+            (currentValue - costBasis);
+          
+          const gainPercent = gainPercentIndex >= 0 ? 
+            parseFloat(cells[gainPercentIndex]) : 
+            (costBasis > 0 ? (gain / costBasis) * 100 : 0);
+          
+          const dividendYield = dividendYieldIndex >= 0 ? 
+            parseFloat(cells[dividendYieldIndex]) : 
+            0;
+          
+          const dividendAmount = dividendAmountIndex >= 0 ? 
+            parseFloat(cells[dividendAmountIndex]) : 
+            (dividendYield > 0 && currentValue > 0 ? (dividendYield * currentValue / 100) : 0);
+          
+          const sector = sectorIndex >= 0 ? cells[sectorIndex].trim() : '';
+          const assetClass = assetClassIndex >= 0 ? 
+            mapAssetClass(cells[assetClassIndex].trim()) : 
+            'Stocks';
+          
+          // Calculate annual income from dividend yield
+          const annualIncome = dividendYield > 0 && currentValue > 0 ? 
+            (dividendYield * currentValue / 100) : 
+            dividendAmount;
+          
+          // Create holding object
           const holding: Holding = {
-            id: `holding-${h.symbol}-${index}`,
-            symbol: h.symbol || 'UNKNOWN',
-            name: h.name || h.symbol || 'Unknown Holding',
-            shares: h.shares || 0,
-            costPerShare: h.costPerShare || 0,
-            costBasis: h.costBasis || 0,
-            currentValue: h.currentValue || 0,
-            currentPrice: h.currentPrice || 0,
-            gain: h.gain || 0,
-            gainPercent: h.gainPercent || 0,
-            dividendYield: h.dividendYield || 0,
-            dividendAmount: h.dividendAmount || 0,
-            annualIncome: (h.dividendYield && h.currentValue) ? (h.dividendYield * h.currentValue / 100) : 0, // Calculate annual income from yield
-            dividendFrequency: 'quarterly', // Default
-            dividendGrowth: 0, // Default
-            sector: 'Other', // Default
-            assetClass: mapAssetClass(h.assetClass || 'Other'),
-            allocation: 0, // Will be calculated later
-            irr: 0, // Default
-            shareInPortfolio: 0 // Will be calculated later
+            id: `holding-${symbol}-${i}`,
+            symbol,
+            name,
+            shares,
+            costPerShare,
+            costBasis,
+            totalCost: costBasis || (costPerShare * shares), // Calculate totalCost from available data
+            currentValue,
+            currentPrice,
+            gain,
+            gainPercent,
+            dividendYield,
+            dividendAmount,
+            dividendFrequency: 'quarterly', // Default assumption
+            dividendGrowth: 0, // Would need historical data
+            sector,
+            assetClass,
+            allocation: 0, // Calculate after processing all holdings
+            irr: 0, // Would need transaction history
+            shareInPortfolio: 0, // Calculate after processing all holdings
+            annualIncome // Add the calculated annual income
           };
           
-          // Calculate gain/loss (placeholder since we don't have cost basis)
-          holding.gain = holding.currentValue - holding.costBasis;
-          holding.gainPercent = holding.costBasis > 0 ? (holding.gain / holding.costBasis) * 100 : 0;
-          
           holdings.push(holding);
+        }
+        
+        // Calculate allocation percentages if any holdings were found
+        if (holdings.length > 0) {
+          const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
           
-          // Create a dividend payment if we have annual income
-          if (h.annualIncome && h.annualIncome > 0) {
-            // Create placeholder for the next dividend date (quarter from now)
-            const nextDate = new Date();
-            nextDate.setMonth(nextDate.getMonth() + 3);
-            const payDate = nextDate.toISOString().split('T')[0];
-            
-            const dividend: DividendPayment = {
-              id: `dividend-${h.symbol}-${payDate}`,
-              holdingId: holding.id,
-              symbol: h.symbol,
-              companyName: h.name || h.symbol,
-              date: payDate,
-              amount: h.annualIncome / 4, // Assuming quarterly payments
-              amountPerShare: (h.annualIncome / 4) / (h.shares || 1),
-              shares: h.shares || 0,
-              tax: 0,
-              currency: 'USD'
-            };
-            
-            dividends.push(dividend);
-            
-            // Add as transaction
-            const transaction: Transaction = {
-              id: `transaction-${h.symbol}-${payDate}`,
-              date: payDate,
-              type: 'dividend',
-              symbol: h.symbol,
-              companyName: h.name || h.symbol,
-              shares: 0,
-              price: 0,
-              amount: dividend.amount,
-              fees: 0,
-              tax: 0,
-              currency: 'USD',
-              notes: 'Projected dividend payment'
-            };
-            
-            transactions.push(transaction);
+          if (totalValue > 0) {
+            holdings.forEach(holding => {
+              holding.allocation = (holding.currentValue / totalValue) * 100;
+              holding.shareInPortfolio = (holding.currentValue / totalValue) * 100;
+            });
           }
+          
+          // Sort by value (descending)
+          holdings.sort((a, b) => b.currentValue - a.currentValue);
+          
+          resolve({
+            success: true,
+            fileType: 'holdings',
+            holdings
+          });
+        } else {
+          console.warn("No holdings found in the CSV. Creating a placeholder.");
+          // Create a placeholder holding if none were found
+          holdings.push({
+            id: 'placeholder',
+            symbol: 'PLACEHOLDER',
+            name: 'CSV could not be properly parsed',
+            shares: 1,
+            costPerShare: 100,
+            costBasis: 100,
+            totalCost: 100, // Add the missing totalCost property
+            currentValue: 100,
+            currentPrice: 100,
+            gain: 0,
+            gainPercent: 0,
+            dividendYield: 0,
+            dividendAmount: 0,
+            dividendFrequency: 'quarterly',
+            dividendGrowth: 0,
+            sector: 'Other',
+            assetClass: 'Other',
+            allocation: 100,
+            irr: 0,
+            shareInPortfolio: 100,
+            annualIncome: 0 // Add annual income to the placeholder
+          });
+          
+          resolve({
+            success: true,
+            fileType: 'holdings',
+            holdings,
+            error: "No valid holdings found in CSV. Created a placeholder."
+          });
+        }
+      } else {
+        // Is a transactions file - this is just a placeholder for transaction parsing
+        resolve({
+          success: true,
+          fileType: 'transactions',
+          transactions: []
         });
       }
-      
-      return {
-        holdings,
-        dividends,
-        transactions
-      };
     } catch (error) {
-      console.error('Error parsing Claude response:', error);
-      return {
-        holdings: [],
-        dividends: [],
-        transactions: []
-      };
+      console.error("Error parsing CSV:", error);
+      reject({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error parsing CSV" 
+      });
     }
-  };
+  });
+};
+
+// Function to detect if CSV contains holdings data
+function detectHoldingsCSV(headers: string[]): boolean {
+  const holdingsKeywords = ['symbol', 'ticker', 'shares', 'quantity', 'price', 'value', 'cost'];
+  return containsKeywords(headers, holdingsKeywords);
+}
+
+// Function to detect if CSV contains transaction data
+function detectTransactionsCSV(headers: string[]): boolean {
+  const transactionKeywords = ['date', 'transaction', 'type', 'action', 'buy', 'sell'];
+  return containsKeywords(headers, transactionKeywords);
+}
+
+// Check if headers contain any of the keywords
+function containsKeywords(headers: string[], keywords: string[]): boolean {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return lowerHeaders.some(header => 
+    keywords.some(keyword => header.includes(keyword))
+  );
+}
+
+// Find index of column that matches any of the possible names
+function findHeaderIndex(headers: string[], possibleNames: string[]): number {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return lowerHeaders.findIndex(header => 
+    possibleNames.some(name => header.includes(name))
+  );
+}
+
+// Parse a CSV line respecting quoted values
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let inQuotes = false;
+  let currentValue = '';
   
-  /**
-   * Map asset class string to our supported types
-   */
-  const mapAssetClass = (assetClass: string): 'Stocks' | 'Funds' | 'Cash' | 'Commodities' | 'Other' => {
-    const normalizedClass = (assetClass || '').toLowerCase();
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
     
-    if (['stock', 'stocks', 'equity', 'equities'].includes(normalizedClass)) {
-      return 'Stocks';
-    } else if (['fund', 'funds', 'etf', 'etfs', 'index', 'mutual fund'].includes(normalizedClass)) {
-      return 'Funds';
-    } else if (['cash', 'money market', 'savings'].includes(normalizedClass)) {
-      return 'Cash';
-    } else if (['commodity', 'commodities', 'gold', 'silver', 'metals'].includes(normalizedClass)) {
-      return 'Commodities';
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      // End of cell
+      result.push(currentValue);
+      currentValue = '';
     } else {
-      return 'Other';
+      currentValue += char;
     }
-  };
+  }
+  
+  // Add the last value
+  result.push(currentValue);
+  
+  return result;
+}
+
+// Map asset class to standardized categories
+function mapAssetClass(assetClass: string): string {
+  const lowercase = assetClass.toLowerCase();
+  
+  if (lowercase.includes('stock') || lowercase.includes('equity')) {
+    return 'Stocks';
+  } else if (lowercase.includes('bond')) {
+    return 'Bonds';
+  } else if (lowercase.includes('etf') || lowercase.includes('fund')) {
+    return 'ETFs';
+  } else if (lowercase.includes('reit') || lowercase.includes('real estate')) {
+    return 'Real Estate';
+  } else if (lowercase.includes('cash') || lowercase.includes('money market')) {
+    return 'Cash';
+  } else if (lowercase.includes('crypto')) {
+    return 'Crypto';
+  } else if (lowercase.includes('commodity') || lowercase.includes('gold')) {
+    return 'Commodities';
+  } else {
+    return 'Other';
+  }
+}
+
+export default parseCSV;

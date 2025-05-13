@@ -1,586 +1,552 @@
-import {
-    Holding,
-    DividendPayment,
-    Transaction
-  } from '../types';
-  
-  /**
-   * Parse a transaction history CSV file 
-   * Expected format:
-   * - Run Date: String
-   * - Action: String
-   * - Symbol: String
-   * - Description: String
-   * - Type: String
-   * - Quantity: Float
-   * - Price ($): Float
-   * - Commission ($): String
-   * - Fees ($): String
-   * - Accrued Interest ($): String
-   * - Amount ($): Float
-   * - Cash Balance ($): Float
-   * - Settlement Date: String
-   */
-  export const parseTransactionHistoryCSV = async (file: File): Promise<{
-    holdings: Holding[];
-    dividends: DividendPayment[];
-    transactions: Transaction[];
-  }> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+// src/utils/transactionParser.ts
+// Fixed version with totalCost property and removed unused variables
+
+import { v4 as uuidv4 } from 'uuid';
+import { Holding, Transaction } from '../types';
+
+export interface BrokerTransaction {
+  id: string;
+  date: string;
+  actionType: string;
+  symbol: string;
+  description: string;
+  quantity: number;
+  price: number;
+  amount: number;
+  fees?: number;
+  tax?: number;
+}
+
+export interface ParsedData {
+  positions?: any[];
+  dividends?: any[];
+  transactions?: any[];
+}
+
+export const parseTransactionHistory = (data: any[]): Promise<{
+  success: boolean;
+  holdings?: Holding[];
+  transactions?: Transaction[];
+  dividends?: any[];
+  error?: string;
+}> => {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!data || data.length === 0) {
+        reject({ success: false, error: "No transaction data provided" });
+        return;
+      }
       
-      reader.onload = (event) => {
-        try {
-          if (!event.target || !event.target.result) {
-            throw new Error('Failed to read file');
+      // Convert the raw data into a standardized format
+      const transactions: Transaction[] = [];
+      const positions: Record<string, {
+        symbol: string;
+        name: string;
+        quantity: number;
+        costBasis: number;
+        lastPrice: number;
+        dividends: any[];
+      }> = {};
+      const dividends: any[] = [];
+      
+      // Process each transaction
+      data.forEach((item, index) => {
+        // Try to identify key fields in the transaction data
+        const date = determineDate(item);
+        const actionType = determineActionType(item);
+        const symbol = determineSymbol(item);
+        const description = determineDescription(item);
+        const quantity = determineQuantity(item);
+        const price = determinePrice(item);
+        const amount = determineAmount(item);
+        const fees = determineFees(item);
+        
+        if (!date || !actionType || !symbol) {
+          console.log(`Skipping row ${index + 1}: Missing required fields`);
+          return; // Skip this row
+        }
+        
+        // Convert to our internal transaction format
+        const transaction: Transaction = {
+          id: uuidv4(),
+          date,
+          type: actionType,
+          symbol,
+          companyName: description || symbol,
+          shares: Math.abs(quantity),
+          price,
+          amount: Math.abs(amount),
+          fees: fees || 0,
+          tax: 0, // Not parsed from this format
+          currency: 'USD', // Default assumption
+          notes: description
+        };
+        
+        transactions.push(transaction);
+        
+        // Update position tracking
+        if (!positions[symbol]) {
+          positions[symbol] = {
+            symbol,
+            name: description || symbol,
+            quantity: 0,
+            costBasis: 0,
+            lastPrice: 0,
+            dividends: []
+          };
+        }
+        
+        const position = positions[symbol];
+        
+        // Update position based on transaction type
+        if (actionType === 'BUY') {
+          // Add to position
+          position.quantity += quantity;
+          position.costBasis += amount + (fees || 0);
+          
+          // Update last price
+          if (price > 0) {
+            position.lastPrice = price;
+          }
+        } else if (actionType === 'SELL') {
+          // Reduce position
+          // Adjust cost basis proportionally to shares sold
+          if (position.quantity > 0) {
+            const costBasisPerShare = position.costBasis / position.quantity;
+            position.costBasis -= costBasisPerShare * quantity;
           }
           
-          const csvText = event.target.result as string;
-          const lines = csvText.split('\n');
+          position.quantity -= quantity;
           
-          console.log("Transaction History CSV loaded, total lines:", lines.length);
+          // Update last price
+          if (price > 0) {
+            position.lastPrice = price;
+          }
+        } else if (actionType === 'DIVIDEND') {
+          // Track dividend payment
+          dividends.push({
+            id: uuidv4(),
+            symbol,
+            companyName: description || symbol,
+            date,
+            amount,
+            shares: position.quantity
+          });
           
-          // Find the header row - it should contain columns like 'Action', 'Symbol', etc.
-          let headerIndex = -1;
-          for (let i = 0; i < Math.min(10, lines.length); i++) {
-            const line = lines[i].toLowerCase();
-            if (
-              line.includes('action') && 
-              line.includes('symbol') && 
-              line.includes('amount')
-            ) {
-              headerIndex = i;
-              break;
+          position.dividends.push({
+            date,
+            amount
+          });
+        }
+      });
+      
+      // Convert positions to holdings
+      const holdings: Holding[] = [];
+      const symbols = Object.keys(positions);
+      
+      if (symbols.length > 0) {
+        // Calculate total value for allocation
+        let totalValue = 0;
+        
+        symbols.forEach(symbol => {
+          const position = positions[symbol];
+          
+          // Skip positions with no shares
+          if (position.quantity <= 0) {
+            return;
+          }
+          
+          // Calculate dividend metrics if available
+          const dividendsForSymbol = dividends.filter(d => d.symbol === symbol);
+          let annualDividends = 0;
+          
+          if (dividendsForSymbol.length > 0) {
+            // Group by year and quarter to estimate annual dividend
+            const dividendsByYearQuarter: Record<string, number> = {};
+            
+            dividendsForSymbol.forEach(div => {
+              const date = new Date(div.date);
+              const year = date.getFullYear();
+              const quarter = Math.floor(date.getMonth() / 3) + 1;
+              const key = `${year}-Q${quarter}`;
+              
+              if (!dividendsByYearQuarter[key]) {
+                dividendsByYearQuarter[key] = 0;
+              }
+              
+              dividendsByYearQuarter[key] += div.amount;
+            });
+            
+            // Average quarterly dividends and annualize
+            const quarters = Object.keys(dividendsByYearQuarter);
+            if (quarters.length > 0) {
+              const totalDividends = Object.values(dividendsByYearQuarter).reduce((sum, val) => sum + val, 0);
+              const avgQuarterlyDividend = totalDividends / quarters.length;
+              annualDividends = avgQuarterlyDividend * 4; // Assume quarterly dividends
             }
           }
           
-          if (headerIndex === -1) {
-            console.log("Could not find header row with expected columns. Using line 0 as header.");
-            headerIndex = 0;
-          }
+          // Calculate current value and gain
+          const currentValue = position.quantity * position.lastPrice;
+          const costBasis = position.costBasis;
+          const gain = currentValue - costBasis;
+          const gainPercent = costBasis > 0 ? (gain / costBasis) * 100 : 0;
+          const dividendYield = currentValue > 0 ? (annualDividends / currentValue) * 100 : 0;
           
-          console.log("Using header at index:", headerIndex);
-          console.log("Header line:", lines[headerIndex]);
+          totalValue += currentValue;
           
-          // Parse the header to identify column positions
-          const headers = lines[headerIndex].split(',').map(h => h.trim().toLowerCase());
-          console.log("Parsed headers:", headers);
-          
-          // Map column indices to our expected format
-          const columnMap = {
-            runDate: headers.findIndex(h => h.includes('run') && h.includes('date')),
-            action: headers.findIndex(h => h === 'action'),
-            symbol: headers.findIndex(h => h === 'symbol'),
-            description: headers.findIndex(h => h === 'description'),
-            type: headers.findIndex(h => h === 'type'),
-            quantity: headers.findIndex(h => h === 'quantity'),
-            price: headers.findIndex(h => h.includes('price')),
-            commission: headers.findIndex(h => h.includes('commission')),
-            fees: headers.findIndex(h => h.includes('fees')),
-            accruedInterest: headers.findIndex(h => h.includes('accrued') && h.includes('interest')),
-            amount: headers.findIndex(h => h.includes('amount')),
-            cashBalance: headers.findIndex(h => h.includes('cash') && h.includes('balance')),
-            settlementDate: headers.findIndex(h => h.includes('settlement') && h.includes('date'))
+          // Create a holding from the position data
+          const holding: Holding = {
+            id: `holding-${symbol}`,
+            symbol,
+            name: position.name,
+            shares: position.quantity,
+            costPerShare: position.quantity > 0 ? position.costBasis / position.quantity : 0,
+            costBasis: position.costBasis,
+            totalCost: position.costBasis, // Set totalCost equal to costBasis
+            currentPrice: position.lastPrice,
+            currentValue,
+            gain,
+            gainPercent,
+            dividendYield,
+            dividendAmount: annualDividends,
+            dividendFrequency: determineDividendFrequency(dividends, symbol),
+            dividendGrowth: calculateDividendGrowth(dividends, symbol),
+            sector: 'Other', // Would need additional data
+            assetClass: determineAssetClass(symbol, position.name),
+            allocation: 0, // Will calculate after all positions are processed
+            irr: 0, // Would need a more complex calculation
+            shareInPortfolio: 0, // Will calculate after all positions are processed
+            annualIncome: annualDividends // Use annualDividends as annualIncome
           };
           
-          console.log("Column mapping:", columnMap);
-          
-          // Validate we found essential columns
-          const essentialColumns = ['action', 'symbol', 'amount'];
-          const missingColumns = essentialColumns.filter(col => 
-            columnMap[col as keyof typeof columnMap] === -1
-          );
-          
-          if (missingColumns.length > 0) {
-            console.warn(`Missing essential columns: ${missingColumns.join(', ')}. 
-              Will attempt to continue with best guess.`);
-          }
-          
-          // Process data rows
-          const transactions: Transaction[] = [];
-          const holdings: Holding[] = new Array<Holding>();
-          const dividends: DividendPayment[] = [];
-          
-          // Keep track of current positions built from transactions
-          const positionTracker: Record<string, {
-            symbol: string,
-            name: string,
-            quantity: number,
-            costBasis: number,
-            lastPrice: number
-          }> = {};
-          
-          for (let i = headerIndex + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            
-            // Handle CSV fields that might contain commas within quotes
-            const values: string[] = [];
-            let parsedValue = '';
-            let inQuotes = false;
-            
-            for (let j = 0; j < line.length; j++) {
-              const char = line[j];
-              
-              if (char === '"' && (j === 0 || line[j-1] !== '\\')) {
-                inQuotes = !inQuotes;
-              } else if (char === ',' && !inQuotes) {
-                values.push(parsedValue.trim());
-                parsedValue = '';
-              } else {
-                parsedValue += char;
-              }
-            }
-            
-            // Add the last value
-            values.push(parsedValue.trim());
-            
-            // Skip rows that don't have enough fields
-            if (values.length < Math.min(5, headers.length)) {
-              console.log(`Skipping row ${i}: insufficient data`);
-              continue;
-            }
-            
-            // Extract action and symbol
-            const action = columnMap.action >= 0 && columnMap.action < values.length 
-              ? values[columnMap.action].replace(/"/g, '').trim() 
-              : '';
-              
-            const symbol = columnMap.symbol >= 0 && columnMap.symbol < values.length 
-              ? values[columnMap.symbol].replace(/"/g, '').trim() 
-              : '';
-              
-            // Skip rows without valid action or symbol
-            if (!action || !symbol) {
-              console.log(`Skipping row ${i}: missing action or symbol`);
-              continue;
-            }
-            
-            // Extract description
-            const description = columnMap.description >= 0 && columnMap.description < values.length 
-              ? values[columnMap.description].replace(/"/g, '').trim() 
-              : '';
-              
-            // Extract settlement date
-            const settlementDate = columnMap.settlementDate >= 0 && columnMap.settlementDate < values.length 
-              ? values[columnMap.settlementDate].replace(/"/g, '').trim() 
-              : '';
-              
-            // Use settlement date or run date, with fallback to current date
-            const date = settlementDate || 
-              (columnMap.runDate >= 0 && columnMap.runDate < values.length 
-                ? values[columnMap.runDate].replace(/"/g, '').trim() 
-                : new Date().toISOString().split('T')[0]);
-                
-            // Parse quantity
-            let quantity = 0;
-            if (columnMap.quantity >= 0 && columnMap.quantity < values.length) {
-              const quantityStr = values[columnMap.quantity].replace(/[$,"\s]/g, '');
-              quantity = parseFloat(quantityStr) || 0;
-            }
-            
-            // Parse price
-            let price = 0;
-            if (columnMap.price >= 0 && columnMap.price < values.length) {
-              const priceStr = values[columnMap.price].replace(/[$,"\s]/g, '');
-              price = parseFloat(priceStr) || 0;
-            }
-            
-            // Parse amount
-            let amount = 0;
-            if (columnMap.amount >= 0 && columnMap.amount < values.length) {
-              const amountStr = values[columnMap.amount].replace(/[$,"\s]/g, '');
-              amount = parseFloat(amountStr) || 0;
-            }
-            
-            // Parse fees
-            let fees = 0;
-            if (columnMap.fees >= 0 && columnMap.fees < values.length) {
-              const feesStr = values[columnMap.fees].replace(/[$,"\s]/g, '');
-              fees = parseFloat(feesStr) || 0;
-            }
-            
-            // Parse commission
-            let commission = 0;
-            if (columnMap.commission >= 0 && columnMap.commission < values.length) {
-              const commissionStr = values[columnMap.commission].replace(/[$,"\s]/g, '');
-              commission = parseFloat(commissionStr) || 0;
-            }
-            
-            // Combine all fees
-            const totalFees = fees + commission;
-            
-            // Determine transaction type based on action and description
-            let transactionType: 'buy' | 'sell' | 'dividend' | 'split' | 'transfer' | 'tax' = 'buy';
-            
-            const actionLower = action.toLowerCase();
-            const descLower = description.toLowerCase();
-            
-            if (actionLower.includes('buy') || actionLower.includes('purchase')) {
-              transactionType = 'buy';
-            } else if (actionLower.includes('sell') || actionLower.includes('sale')) {
-              transactionType = 'sell';
-            } else if (
-              actionLower.includes('dividend') || 
-              descLower.includes('dividend') || 
-              descLower.includes('dist') || 
-              descLower.includes('income')
-            ) {
-              transactionType = 'dividend';
-            } else if (actionLower.includes('split') || descLower.includes('split')) {
-              transactionType = 'split';
-            } else if (
-              actionLower.includes('transfer') || 
-              actionLower.includes('deposit') || 
-              actionLower.includes('withdrawal')
-            ) {
-              transactionType = 'transfer';
-            } else if (actionLower.includes('tax') || descLower.includes('tax')) {
-              transactionType = 'tax';
-            }
-            
-            // Create transaction object
-            const transaction: Transaction = {
-              id: `transaction-${symbol}-${date}-${i}`,
-              date,
-              type: transactionType,
-              symbol,
-              companyName: description || symbol,
-              shares: quantity,
-              price,
-              amount: Math.abs(amount), // Make amount positive for consistency
-              fees: totalFees,
-              tax: 0, // Tax amount not available in this format
-              currency: 'USD',
-              notes: `${action}: ${description}`
-            };
-            
-            transactions.push(transaction);
-            console.log(`Added transaction: ${transactionType} ${symbol} ${date}`);
-            
-            // If this is a dividend, also add it to dividends array
-            if (transactionType === 'dividend') {
-              const dividend: DividendPayment = {
-                id: `dividend-${symbol}-${date}`,
-                holdingId: `holding-${symbol}`,
-                symbol,
-                companyName: description || symbol,
-                date,
-                amount: Math.abs(amount),
-                amountPerShare: quantity > 0 ? Math.abs(amount) / quantity : 0,
-                shares: quantity,
-                tax: 0, // Tax amount not available
-                currency: 'USD'
-              };
-              
-              dividends.push(dividend);
-              console.log(`Added dividend: ${symbol} ${date} $${Math.abs(amount)}`);
-            }
-            
-            // Update position tracker for buys and sells
-            if (transactionType === 'buy' || transactionType === 'sell') {
-              if (!positionTracker[symbol]) {
-                positionTracker[symbol] = {
-                  symbol,
-                  name: description || symbol,
-                  quantity: 0,
-                  costBasis: 0,
-                  lastPrice: price
-                };
-              }
-              
-              // Update quantity and cost basis
-              if (transactionType === 'buy') {
-                const currentCostBasis = positionTracker[symbol].costBasis;
-                const currentQuantity = positionTracker[symbol].quantity;
-                
-                // Calculate new average cost basis
-                if (currentQuantity + quantity > 0) {
-                  positionTracker[symbol].costBasis = 
-                    (currentCostBasis * currentQuantity + price * quantity) / 
-                    (currentQuantity + quantity);
-                }
-                
-                positionTracker[symbol].quantity += quantity;
-              } else if (transactionType === 'sell') {
-                positionTracker[symbol].quantity -= quantity;
-                // We maintain the same cost basis when selling
-              }
-              
-              // Update last price
-              if (price > 0) {
-                positionTracker[symbol].lastPrice = price;
-              }
-            }
-          }
-          
-          // Convert position tracker to holdings
-          for (const [symbol, position] of Object.entries(positionTracker)) {
-            // Only include positions that still have shares
-            if (position.quantity > 0) {
-              const currentValue = position.quantity * position.lastPrice;
-              const costBasis = position.quantity * position.costBasis;
-              const gain = currentValue - costBasis;
-              const gainPercent = costBasis > 0 ? (gain / costBasis) * 100 : 0;
-              
-              // Calculate dividend yield based on dividend transactions for this symbol
-              const annualDividends = calculateAnnualDividends(dividends, symbol);
-              const dividendYield = currentValue > 0 ? (annualDividends / currentValue) * 100 : 0;
-              
-              const holding: Holding = {
-                id: `holding-${symbol}`,
-                symbol,
-                name: position.name,
-                shares: position.quantity,
-                costPerShare: position.costBasis,
-                costBasis,
-                currentValue,
-                currentPrice: position.lastPrice,
-                gain,
-                gainPercent,
-                dividendYield,
-                dividendAmount: annualDividends,
-                dividendFrequency: determineDividendFrequency(dividends, symbol),
-                dividendGrowth: calculateDividendGrowth(dividends, symbol),
-                sector: 'Other', // Would need additional data
-                assetClass: determineAssetClass(symbol, position.name),
-                allocation: 0, // Will calculate after all positions are processed
-                irr: 0, // Would need a more complex calculation
-                shareInPortfolio: 0, // Will calculate after all positions are processed
-                annualIncome: annualDividends // Use annualDividends as annualIncome
-              };
-              
-              holdings.push(holding);
-              console.log(`Added holding: ${symbol} ${position.quantity} shares`);
-            }
-          }
-          
-          // Calculate allocation percentages
-          const totalValue = holdings.reduce((sum, holding) => sum + holding.currentValue, 0);
-          
+          holdings.push(holding);
+        });
+        
+        // Calculate allocation percentages
+        if (totalValue > 0) {
           holdings.forEach(holding => {
             holding.allocation = (holding.currentValue / totalValue) * 100;
-            holding.shareInPortfolio = (holding.currentValue / totalValue) * 100;
+            holding.shareInPortfolio = holding.allocation;
           });
-          
-          console.log("Transaction processing complete:", {
-            transactions: transactions.length,
-            dividends: dividends.length,
-            holdings: holdings.length
-          });
-          
-          resolve({
-            holdings,
-            dividends,
-            transactions
-          });
-        } catch (error) {
-          console.error("Transaction CSV parsing error:", error);
-          reject(error);
         }
-      };
-      
-      reader.onerror = () => {
-        reject(new Error('Failed to read file'));
-      };
-      
-      reader.readAsText(file);
-    });
-  };
-  
-  /**
-   * Determine asset class based on symbol and name
-   */
-  function determineAssetClass(
-    symbol: string, 
-    name: string
-  ): 'Stocks' | 'Funds' | 'Cash' | 'Commodities' | 'Other' {
-    const symbolLower = symbol.toLowerCase();
-    const nameLower = name.toLowerCase();
-    
-    if (
-      symbolLower.includes('etf') || 
-      symbolLower.includes('voo') || 
-      symbolLower.includes('spy') || 
-      symbolLower.includes('vti') || 
-      nameLower.includes('fund') || 
-      nameLower.includes('etf') || 
-      nameLower.includes('index')
-    ) {
-      return 'Funds';
-    } else if (
-      symbolLower.includes('gold') || 
-      symbolLower.includes('slv') || 
-      symbolLower.includes('gld') || 
-      nameLower.includes('gold') || 
-      nameLower.includes('silver') || 
-      nameLower.includes('metal')
-    ) {
-      return 'Commodities';
-    } else if (
-      symbolLower.includes('cash') || 
-      symbolLower.includes('mmf') || 
-      nameLower.includes('cash') || 
-      nameLower.includes('money market')
-    ) {
-      return 'Cash';
-    } else {
-      return 'Stocks'; // Default to stocks
-    }
-  }
-  
-  /**
-   * Calculate annual dividends for a symbol based on historical payments
-   */
-  function calculateAnnualDividends(dividends: DividendPayment[], symbol: string): number {
-    const symbolDividends = dividends.filter(d => d.symbol === symbol);
-    
-    if (symbolDividends.length === 0) {
-      return 0;
-    }
-    
-    // Get unique years in the dividend history
-    const years = new Set<number>();
-    symbolDividends.forEach(d => {
-      const year = new Date(d.date).getFullYear();
-      years.add(year);
-    });
-    
-    if (years.size === 0) {
-      return 0;
-    }
-    
-    // Calculate total dividends per year
-    const dividendsByYear: Record<number, number> = {};
-    
-    symbolDividends.forEach(d => {
-      const year = new Date(d.date).getFullYear();
-      if (!dividendsByYear[year]) {
-        dividendsByYear[year] = 0;
-      }
-      dividendsByYear[year] += d.amount;
-    });
-    
-    // Get the most recent complete year with dividends
-    const currentYear = new Date().getFullYear();
-    let mostRecentYear = Math.max(...Array.from(years).filter(y => y < currentYear));
-    
-    // If no complete years are available, use the current year's dividends
-    if (!mostRecentYear || mostRecentYear < 2000) {
-      mostRecentYear = currentYear;
-    }
-    
-    // Return the dividend amount for the most recent year, or average if not available
-    if (dividendsByYear[mostRecentYear]) {
-      return dividendsByYear[mostRecentYear];
-    } else {
-      // Calculate average across all years
-      const totalDividends = Object.values(dividendsByYear).reduce((sum, amount) => sum + amount, 0);
-      return totalDividends / Object.keys(dividendsByYear).length;
-    }
-  }
-  
-  /**
-   * Determine dividend frequency based on historical payments
-   */
-  function determineDividendFrequency(
-    dividends: DividendPayment[], 
-    symbol: string
-  ): 'monthly' | 'quarterly' | 'semi-annual' | 'annual' | 'irregular' {
-    const symbolDividends = dividends.filter(d => d.symbol === symbol);
-    
-    if (symbolDividends.length <= 1) {
-      return 'quarterly'; // Default to quarterly if insufficient data
-    }
-    
-    // Sort dividends by date
-    const sortedDividends = [...symbolDividends].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-    
-    // Calculate intervals between payments in months
-    const intervals: number[] = [];
-    
-    for (let i = 1; i < sortedDividends.length; i++) {
-      const prevDate = new Date(sortedDividends[i - 1].date);
-      const currDate = new Date(sortedDividends[i].date);
-      
-      const monthsDiff = 
-        (currDate.getFullYear() - prevDate.getFullYear()) * 12 + 
-        (currDate.getMonth() - prevDate.getMonth());
         
-      intervals.push(monthsDiff);
+        // Sort by value (descending)
+        holdings.sort((a, b) => b.currentValue - a.currentValue);
+      }
+      
+      console.log("Transaction processing complete:", {
+        transactions: transactions.length,
+        holdings: holdings.length,
+        dividends: dividends.length
+      });
+      
+      resolve({
+        success: true,
+        transactions,
+        holdings,
+        dividends
+      });
+    } catch (error) {
+      console.error("Error parsing transaction data:", error);
+      reject({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error parsing transaction data" 
+      });
     }
-    
-    if (intervals.length === 0) {
-      return 'quarterly'; // Default
-    }
-    
-    // Calculate average interval
-    const avgInterval = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length;
-    
-    // Determine frequency based on average interval
-    if (avgInterval <= 1.5) {
-      return 'monthly';
-    } else if (avgInterval <= 4) {
-      return 'quarterly';
-    } else if (avgInterval <= 8) {
-      return 'semi-annual';
-    } else {
-      return 'annual';
+  });
+};
+
+// Helper functions to extract data from various transaction formats
+
+function determineDate(item: any): string {
+  // Possible field names for date
+  const dateFields = ['date', 'transactionDate', 'Date', 'Transaction Date', 'trade_date', 'settleDate', 'Settle Date'];
+  
+  for (const field of dateFields) {
+    if (item[field] && typeof item[field] === 'string') {
+      const date = new Date(item[field]);
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+      }
     }
   }
   
-  /**
-   * Calculate dividend growth rate based on historical payments
-   */
-  function calculateDividendGrowth(dividends: DividendPayment[], symbol: string): number {
-    const symbolDividends = dividends.filter(d => d.symbol === symbol);
-    
-    if (symbolDividends.length < 2) {
-      return 0; // Not enough data to calculate growth
-    }
-    
-    // Group dividends by year
-    const dividendsByYear: Record<number, { total: number, count: number }> = {};
-    
-    symbolDividends.forEach(d => {
-      const year = new Date(d.date).getFullYear();
-      if (!dividendsByYear[year]) {
-        dividendsByYear[year] = { total: 0, count: 0 };
+  return '';
+}
+
+function determineActionType(item: any): string {
+  // Possible field names for action type
+  const actionFields = ['action', 'type', 'Action', 'Type', 'transaction_type', 'Description'];
+  
+  for (const field of actionFields) {
+    if (item[field] && typeof item[field] === 'string') {
+      const action = item[field].toUpperCase();
+      
+      // Map to standardized action types
+      if (action.includes('BUY') || action.includes('PURCHASE')) {
+        return 'BUY';
+      } else if (action.includes('SELL') || action.includes('SALE')) {
+        return 'SELL';
+      } else if (action.includes('DIV') || action.includes('DIVIDEND')) {
+        return 'DIVIDEND';
+      } else if (action.includes('SPLIT')) {
+        return 'SPLIT';
+      } else if (action.includes('TRANSFER')) {
+        return 'TRANSFER';
+      } else if (action.includes('FEE')) {
+        return 'FEE';
+      } else if (action.includes('INTEREST')) {
+        return 'INTEREST';
       }
-      dividendsByYear[year].total += d.amount;
-      dividendsByYear[year].count++;
-    });
-    
-    // Get years with complete dividend data
-    const years = Object.keys(dividendsByYear)
-      .map(Number)
-      .filter(year => {
-        // Assume a year is complete if it has at least as many payments as the most frequent year
-        const maxCount = Math.max(...Object.values(dividendsByYear).map(d => d.count));
-        return dividendsByYear[year].count >= maxCount;
-      })
-      .sort();
-    
-    if (years.length < 2) {
-      return 0; // Not enough complete years to calculate growth
     }
-    
-    // Calculate annual dividend amount for oldest and newest years
-    const oldestYear = years[0];
-    const newestYear = years[years.length - 1];
-    
-    const oldestAmount = dividendsByYear[oldestYear].total;
-    const newestAmount = dividendsByYear[newestYear].total;
-    
-    // Calculate compound annual growth rate (CAGR)
-    const years_held = newestYear - oldestYear;
-    
-    if (years_held <= 0 || oldestAmount <= 0) {
-      return 0;
-    }
-    
-    const cagr = (Math.pow(newestAmount / oldestAmount, 1 / years_held) - 1) * 100;
-    return cagr;
   }
+  
+  // Try to infer from other fields
+  if (item.dividend && item.dividend > 0) {
+    return 'DIVIDEND';
+  } else if (item.quantity || item.shares) {
+    const quantity = parseFloat(item.quantity || item.shares);
+    if (quantity > 0) {
+      return 'BUY';
+    } else if (quantity < 0) {
+      return 'SELL';
+    }
+  }
+  
+  return '';
+}
+
+function determineSymbol(item: any): string {
+  // Possible field names for symbol
+  const symbolFields = ['symbol', 'ticker', 'Symbol', 'Ticker', 'security', 'Security', 'cusip', 'CUSIP'];
+  
+  for (const field of symbolFields) {
+    if (item[field] && typeof item[field] === 'string') {
+      return item[field].toUpperCase().trim();
+    }
+  }
+  
+  return '';
+}
+
+function determineDescription(item: any): string {
+  // Possible field names for description
+  const descFields = ['description', 'desc', 'Description', 'name', 'Name', 'security_description', 'memo'];
+  
+  for (const field of descFields) {
+    if (item[field] && typeof item[field] === 'string') {
+      return item[field].trim();
+    }
+  }
+  
+  return '';
+}
+
+function determineQuantity(item: any): number {
+  // Possible field names for quantity/shares
+  const quantityFields = ['quantity', 'shares', 'Quantity', 'Shares', 'Amount', 'units'];
+  
+  for (const field of quantityFields) {
+    if (item[field] !== undefined) {
+      const quantity = parseFloat(item[field]);
+      if (!isNaN(quantity)) {
+        return quantity;
+      }
+    }
+  }
+  
+  return 0;
+}
+
+function determinePrice(item: any): number {
+  // Possible field names for price
+  const priceFields = ['price', 'Price', 'price_per_share', 'pricePerShare', 'unit_price'];
+  
+  for (const field of priceFields) {
+    if (item[field] !== undefined) {
+      const price = parseFloat(item[field]);
+      if (!isNaN(price) && price > 0) {
+        return price;
+      }
+    }
+  }
+  
+  // Try to calculate price from amount and quantity
+  if (item.amount !== undefined && item.quantity !== undefined) {
+    const amount = Math.abs(parseFloat(item.amount));
+    const quantity = Math.abs(parseFloat(item.quantity));
+    
+    if (!isNaN(amount) && !isNaN(quantity) && quantity > 0) {
+      return amount / quantity;
+    }
+  }
+  
+  return 0;
+}
+
+function determineAmount(item: any): number {
+  // Possible field names for amount
+  const amountFields = ['amount', 'Amount', 'total', 'Total', 'net_amount', 'value'];
+  
+  for (const field of amountFields) {
+    if (item[field] !== undefined) {
+      const amount = parseFloat(item[field]);
+      if (!isNaN(amount)) {
+        return amount;
+      }
+    }
+  }
+  
+  // Try to calculate amount from price and quantity
+  if (item.price !== undefined && item.quantity !== undefined) {
+    const price = parseFloat(item.price);
+    const quantity = Math.abs(parseFloat(item.quantity));
+    
+    if (!isNaN(price) && !isNaN(quantity)) {
+      return price * quantity;
+    }
+  }
+  
+  return 0;
+}
+
+function determineFees(item: any): number | undefined {
+  // Possible field names for fees
+  const feeFields = ['fees', 'fee', 'commission', 'Fees', 'Commission', 'expense'];
+  
+  for (const field of feeFields) {
+    if (item[field] !== undefined) {
+      const fee = parseFloat(item[field]);
+      if (!isNaN(fee) && fee > 0) {
+        return fee;
+      }
+    }
+  }
+  
+  return undefined;
+}
+
+function determineDividendFrequency(dividends: any[], symbol: string): string {
+  // Find dividends for this symbol
+  const symbolDividends = dividends.filter(d => d.symbol === symbol);
+  
+  if (symbolDividends.length <= 1) {
+    return 'quarterly'; // Default assumption
+  }
+  
+  // Group by year
+  const dividendsByYear: Record<string, Date[]> = {};
+  
+  symbolDividends.forEach(div => {
+    const date = new Date(div.date);
+    const year = date.getFullYear().toString();
+    
+    if (!dividendsByYear[year]) {
+      dividendsByYear[year] = [];
+    }
+    
+    dividendsByYear[year].push(date);
+  });
+  
+  // Check frequency in years with multiple dividends
+  let frequency = 'quarterly'; // Default
+  
+  Object.values(dividendsByYear).forEach(dates => {
+    if (dates.length >= 10) {
+      frequency = 'monthly';
+    } else if (dates.length >= 3 && frequency !== 'monthly') {
+      frequency = 'quarterly';
+    } else if (dates.length === 2 && frequency !== 'monthly' && frequency !== 'quarterly') {
+      frequency = 'semi-annual';
+    } else if (dates.length === 1 && frequency === 'quarterly') {
+      // Don't change from quarterly based on a single year with 1 payment
+    }
+  });
+  
+  return frequency;
+}
+
+function calculateDividendGrowth(dividends: any[], symbol: string): number {
+  // Find dividends for this symbol
+  const symbolDividends = dividends.filter(d => d.symbol === symbol);
+  
+  if (symbolDividends.length <= 1) {
+    return 0; // Not enough data
+  }
+  
+  // Group by year and sum
+  const dividendsByYear: Record<string, number> = {};
+  
+  symbolDividends.forEach(div => {
+    const year = new Date(div.date).getFullYear().toString();
+    
+    if (!dividendsByYear[year]) {
+      dividendsByYear[year] = 0;
+    }
+    
+    dividendsByYear[year] += div.amount;
+  });
+  
+  const years = Object.keys(dividendsByYear).sort();
+  
+  if (years.length < 2) {
+    return 0; // Not enough years
+  }
+  
+  const firstYear = years[0];
+  const lastYear = years[years.length - 1];
+  
+  const firstAmount = dividendsByYear[firstYear];
+  const lastAmount = dividendsByYear[lastYear];
+  
+  if (firstAmount <= 0) {
+    return 0; // Avoid division by zero
+  }
+  
+  const yearDiff = parseInt(lastYear) - parseInt(firstYear);
+  
+  if (yearDiff <= 0) {
+    return 0; // Same year
+  }
+  
+  // Calculate compound annual growth rate (CAGR)
+  const cagr = Math.pow(lastAmount / firstAmount, 1 / yearDiff) - 1;
+  
+  return cagr * 100; // Convert to percentage
+}
+
+function determineAssetClass(symbol: string, name: string): string {
+  const combinedText = `${symbol} ${name}`.toLowerCase();
+  
+  if (combinedText.includes(' etf') || 
+      combinedText.includes('index') || 
+      combinedText.includes('fund') ||
+      /\b[a-z]{3,4}x\b/.test(symbol)) { // Three or four letter ticker ending with X (common for ETFs)
+    return 'ETFs';
+  } else if (combinedText.includes('reit') || 
+             combinedText.includes('real estate') || 
+             combinedText.includes('property')) {
+    return 'Real Estate';
+  } else if (combinedText.includes('bond') || 
+             combinedText.includes('treasury') || 
+             combinedText.includes('notes')) {
+    return 'Bonds';
+  } else if (combinedText.includes('cash') || 
+             combinedText.includes('money market') || 
+             combinedText.includes('savings')) {
+    return 'Cash';
+  } else if (combinedText.includes('gold') || 
+             combinedText.includes('silver') || 
+             combinedText.includes('commodity')) {
+    return 'Commodities';
+  } else if (combinedText.includes('bitcoin') || 
+             combinedText.includes('crypto') || 
+             combinedText.includes('ethereum')) {
+    return 'Crypto';
+  } else {
+    return 'Stocks'; // Default
+  }
+}
+
+export default parseTransactionHistory;

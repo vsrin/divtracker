@@ -1,434 +1,317 @@
-import {
-    Holding,
-    DividendPayment,
-    Transaction
-  } from '../types';
-  
-  /**
-   * Parse a CSV file from the brokerage, specifically optimized for the user's
-   * Portfolio_Positions_May132025.csv format which has the following columns:
-   * - Account Number
-   * - Account Name
-   * - Symbol
-   * - Description
-   * - Quantity
-   * - Last Price
-   * - Last Price Change
-   * - Current Value
-   * - Percent Of Account
-   * - Ex-Date
-   * - Amount Per Share
-   * - Pay Date
-   * - Dist. Yield
-   * - Distribution yield as of
-   * - SEC Yield
-   * - SEC yield as of
-   * - Est. Annual Income
-   * - Type
-   */
-  export const parseCSV = async (file: File): Promise<{
-    holdings: Holding[];
-    dividends: DividendPayment[];
-    transactions: Transaction[];
-  }> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
+// src/utils/csvParser.ts
+// Fixed version with totalCost property
+
+import { v4 as uuidv4 } from 'uuid';
+import { Holding } from '../types';
+
+interface CSVParseResult {
+  success: boolean;
+  fileType?: string;
+  holdings?: any[];
+  transactions?: any[];
+  error?: string;
+}
+
+export const parseCSV = (csvText: string): Promise<CSVParseResult> => {
+  return new Promise((resolve, reject) => {
+    if (!csvText) {
+      reject({ success: false, error: "No CSV data provided" });
+      return;
+    }
+
+    try {
+      // Split CSV into lines
+      const lines = csvText.split(/\r?\n/);
       
-      reader.onload = (event) => {
-        try {
-          if (!event.target || !event.target.result) {
-            throw new Error('Failed to read file');
+      // Extract headers (first line)
+      const headers = lines[0].split(',').map(header => header.trim());
+      
+      // Determine if this is a holdings or transactions file
+      const isHoldings = detectHoldingsCSV(headers);
+      const isTransactions = detectTransactionsCSV(headers);
+      
+      if (!isHoldings && !isTransactions) {
+        reject({ 
+          success: false, 
+          error: "Could not determine CSV type. Expected headers for holdings or transactions not found."
+        });
+        return;
+      }
+      
+      const fileType = isHoldings ? 'holdings' : 'transactions';
+      
+      // Skip header row and empty lines
+      const dataLines = lines.slice(1).filter(line => line.trim() !== '');
+      
+      if (dataLines.length === 0) {
+        reject({ success: false, error: "No data rows found in CSV" });
+        return;
+      }
+      
+      if (isHoldings) {
+        // Parse as holdings
+        const holdings: Holding[] = [];
+        
+        // Map headers to standard field names
+        const symbolIndex = findHeaderIndex(headers, ['symbol', 'ticker', 'stock']);
+        const nameIndex = findHeaderIndex(headers, ['name', 'description', 'company', 'security']);
+        const sharesIndex = findHeaderIndex(headers, ['shares', 'quantity', 'position']);
+        const costBasisIndex = findHeaderIndex(headers, ['cost basis', 'basis', 'total cost']);
+        const costPerShareIndex = findHeaderIndex(headers, ['cost per share', 'price paid', 'avg price', 'average price']);
+        const currentPriceIndex = findHeaderIndex(headers, ['price', 'current price', 'last price']);
+        const currentValueIndex = findHeaderIndex(headers, ['value', 'current value', 'market value']);
+        const gainIndex = findHeaderIndex(headers, ['gain', 'profit', 'gain/loss', 'p/l']);
+        const gainPercentIndex = findHeaderIndex(headers, ['gain %', 'profit %', 'return', 'return %', 'roi']);
+        const dividendYieldIndex = findHeaderIndex(headers, ['yield', 'dividend yield', 'div yield', 'yield %']);
+        const dividendAmountIndex = findHeaderIndex(headers, ['dividend', 'annual dividend', 'div amount']);
+        const sectorIndex = findHeaderIndex(headers, ['sector', 'industry']);
+        const assetClassIndex = findHeaderIndex(headers, ['asset class', 'asset type', 'security type', 'type']);
+        
+        if (symbolIndex === -1) {
+          reject({ success: false, error: "Required column 'Symbol' not found" });
+          return;
+        }
+        
+        // Process each data line
+        for (let i = 0; i < dataLines.length; i++) {
+          const cells = parseCsvLine(dataLines[i]);
+          
+          // Skip rows with incorrect number of columns
+          if (cells.length !== headers.length) {
+            console.warn(`Skipping row ${i + 2} due to column count mismatch`);
+            continue;
           }
           
-          const csvText = event.target.result as string;
-          const lines = csvText.split('\n');
+          // Get values from cells
+          const symbol = symbolIndex >= 0 ? cells[symbolIndex].trim() : '';
           
-          console.log("CSV loaded, total lines:", lines.length);
-          console.log("First line preview:", lines[0]);
-          
-          // Find the header row - looking for the specific headers in this CSV format
-          let headerIndex = -1;
-          for (let i = 0; i < Math.min(10, lines.length); i++) {
-            const line = lines[i].toLowerCase();
-            if (
-              line.includes('symbol') && 
-              line.includes('description') && 
-              line.includes('quantity') &&
-              line.includes('current value')
-            ) {
-              headerIndex = i;
-              break;
-            }
+          // Skip rows without a symbol
+          if (!symbol) {
+            continue;
           }
           
-          if (headerIndex === -1) {
-            console.log("Could not find header row with expected columns. Using line 0 as header.");
-            headerIndex = 0;
+          const name = nameIndex >= 0 ? cells[nameIndex].trim() : symbol;
+          const shares = sharesIndex >= 0 ? parseFloat(cells[sharesIndex]) : 0;
+          
+          // Skip positions with zero shares
+          if (shares <= 0) {
+            continue;
           }
           
-          console.log("Using header at index:", headerIndex);
-          console.log("Header line:", lines[headerIndex]);
+          // Parse financial values
+          const costBasis = costBasisIndex >= 0 ? parseFloat(cells[costBasisIndex]) : 0;
+          const costPerShare = costPerShareIndex >= 0 ? 
+            parseFloat(cells[costPerShareIndex]) : 
+            (shares > 0 ? costBasis / shares : 0);
           
-          // Parse the header to identify column positions
-          const headers = lines[headerIndex].split(',').map(h => h.trim().toLowerCase());
-          console.log("Parsed headers:", headers);
+          const currentPrice = currentPriceIndex >= 0 ? 
+            parseFloat(cells[currentPriceIndex]) : 
+            0;
           
-          // Map column indices to our expected format
-          const columnMap = {
-            accountNumber: headers.findIndex(h => h.includes('account') && h.includes('number')),
-            accountName: headers.findIndex(h => h.includes('account') && h.includes('name')),
-            symbol: headers.findIndex(h => h === 'symbol'),
-            description: headers.findIndex(h => h === 'description'),
-            quantity: headers.findIndex(h => h === 'quantity'),
-            lastPrice: headers.findIndex(h => h.includes('last') && h.includes('price') && !h.includes('change')),
-            priceChange: headers.findIndex(h => h.includes('price') && h.includes('change')),
-            currentValue: headers.findIndex(h => h.includes('current') && h.includes('value')),
-            percentOfAccount: headers.findIndex(h => h.includes('percent') && h.includes('account')),
-            exDate: headers.findIndex(h => h.includes('ex-date')),
-            amountPerShare: headers.findIndex(h => h.includes('amount') && h.includes('per') && h.includes('share')),
-            payDate: headers.findIndex(h => h.includes('pay') && h.includes('date')),
-            distYield: headers.findIndex(h => h.includes('dist') && h.includes('yield')),
-            yieldAsOf: headers.findIndex(h => h.includes('yield') && h.includes('as of')),
-            secYield: headers.findIndex(h => h.includes('sec') && h.includes('yield') && !h.includes('as of')),
-            secYieldAsOf: headers.findIndex(h => h.includes('sec') && h.includes('yield') && h.includes('as of')),
-            estAnnualIncome: headers.findIndex(h => h.includes('est') && h.includes('annual') && h.includes('income')),
-            type: headers.findIndex(h => h === 'type')
+          const currentValue = currentValueIndex >= 0 ? 
+            parseFloat(cells[currentValueIndex]) : 
+            (currentPrice * shares);
+          
+          const gain = gainIndex >= 0 ? 
+            parseFloat(cells[gainIndex]) : 
+            (currentValue - costBasis);
+          
+          const gainPercent = gainPercentIndex >= 0 ? 
+            parseFloat(cells[gainPercentIndex]) : 
+            (costBasis > 0 ? (gain / costBasis) * 100 : 0);
+          
+          const dividendYield = dividendYieldIndex >= 0 ? 
+            parseFloat(cells[dividendYieldIndex]) : 
+            0;
+          
+          const dividendAmount = dividendAmountIndex >= 0 ? 
+            parseFloat(cells[dividendAmountIndex]) : 
+            (dividendYield > 0 && currentValue > 0 ? (dividendYield * currentValue / 100) : 0);
+          
+          const sector = sectorIndex >= 0 ? cells[sectorIndex].trim() : '';
+          const assetClass = assetClassIndex >= 0 ? 
+            mapAssetClass(cells[assetClassIndex].trim()) : 
+            'Stocks';
+          
+          // Calculate annual income from dividend yield
+          const annualIncome = dividendYield > 0 && currentValue > 0 ? 
+            (dividendYield * currentValue / 100) : 
+            dividendAmount;
+          
+          // Create holding object
+          const holding: Holding = {
+            id: `holding-${symbol}-${i}`,
+            symbol,
+            name,
+            shares,
+            costPerShare,
+            costBasis,
+            totalCost: costBasis || (costPerShare * shares), // Calculate totalCost from available data
+            currentValue,
+            currentPrice,
+            gain,
+            gainPercent,
+            dividendYield,
+            dividendAmount,
+            dividendFrequency: 'quarterly', // Default assumption
+            dividendGrowth: 0, // Would need historical data
+            sector,
+            assetClass,
+            allocation: 0, // Calculate after processing all holdings
+            irr: 0, // Would need transaction history
+            shareInPortfolio: 0, // Calculate after processing all holdings
+            annualIncome // Add the calculated annual income
           };
           
-          console.log("Column mapping:", columnMap);
+          holdings.push(holding);
+        }
+        
+        // Calculate allocation percentages if any holdings were found
+        if (holdings.length > 0) {
+          const totalValue = holdings.reduce((sum, h) => sum + h.currentValue, 0);
           
-          // Validate we found essential columns
-          const essentialColumns = ['symbol', 'quantity', 'lastPrice', 'currentValue'];
-          const missingColumns = essentialColumns.filter(col => 
-            columnMap[col as keyof typeof columnMap] === -1
-          );
-          
-          if (missingColumns.length > 0) {
-            console.warn(`Missing essential columns: ${missingColumns.join(', ')}. 
-              Will attempt to continue with best guess.`);
-          }
-          
-          // Process data rows
-          const holdings: Holding[] = [];
-          const dividends: DividendPayment[] = [];
-          const transactions: Transaction[] = [];
-          
-          let totalPortfolioValue = 0;
-          
-          for (let i = headerIndex + 1; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            
-            // Handle CSV fields that might contain commas within quotes
-            const values: string[] = [];
-            let parsedValue = '';
-            let inQuotes = false;
-            
-            for (let j = 0; j < line.length; j++) {
-              const char = line[j];
-              
-              if (char === '"' && (j === 0 || line[j-1] !== '\\')) {
-                inQuotes = !inQuotes;
-              } else if (char === ',' && !inQuotes) {
-                values.push(parsedValue.trim());
-                parsedValue = '';
-              } else {
-                parsedValue += char;
-              }
-            }
-            
-            // Add the last value
-            values.push(parsedValue.trim());
-            
-            console.log(`Row ${i} has ${values.length} values vs ${headers.length} headers`);
-            
-            // Skip rows that don't have enough fields or appear to be headers/footers
-            if (values.length < Math.min(10, headers.length) || 
-                values.some(v => v.toLowerCase().includes('total')) ||
-                !values[columnMap.symbol] ||
-                values[columnMap.symbol].toLowerCase() === 'symbol') {
-              console.log(`Skipping row ${i}: appears to be a header, footer, or has insufficient data`);
-              continue;
-            }
-            
-            // Extract key data
-            const symbol = columnMap.symbol >= 0 && columnMap.symbol < values.length 
-              ? values[columnMap.symbol].replace(/"/g, '') 
-              : '';
-            
-            // Skip rows without a valid symbol
-            if (!symbol || symbol.toLowerCase() === 'symbol') {
-              console.log(`Skipping row ${i}: no valid symbol`);
-              continue;
-            }
-            
-            // Extract the description/name
-            const name = columnMap.description >= 0 && columnMap.description < values.length 
-              ? values[columnMap.description].replace(/"/g, '') 
-              : symbol;
-              
-            // Parse quantity/shares
-            let shares = 0;
-            if (columnMap.quantity >= 0 && columnMap.quantity < values.length) {
-              const sharesStr = values[columnMap.quantity].replace(/[$,"\s]/g, '');
-              shares = parseFloat(sharesStr) || 0;
-            }
-            
-            // Skip if no shares (likely a header or summary row)
-            if (shares <= 0) {
-              console.log(`Skipping row ${i}: no shares for ${symbol}`);
-              continue;
-            }
-            
-            // Parse price
-            let currentPrice = 0;
-            if (columnMap.lastPrice >= 0 && columnMap.lastPrice < values.length) {
-              const priceStr = values[columnMap.lastPrice].replace(/[$,"\s]/g, '');
-              currentPrice = parseFloat(priceStr) || 0;
-            }
-            
-            // Parse current value
-            let currentValue = 0;
-            if (columnMap.currentValue >= 0 && columnMap.currentValue < values.length) {
-              const valueStr = values[columnMap.currentValue].replace(/[$,"\s]/g, '');
-              currentValue = parseFloat(valueStr) || 0;
-            } else if (currentPrice > 0 && shares > 0) {
-              currentValue = currentPrice * shares;
-            }
-            
-            // Add to the total portfolio value
-            totalPortfolioValue += currentValue;
-            
-            // Calculate cost basis (we don't have this directly, so estimate from current value)
-            // In a real scenario, we'd want actual cost basis data
-            let costBasis = currentValue; // Default for now
-            let costPerShare = currentPrice; // Default for now
-            
-            // Parse dividend yield
-            let dividendYield = 0;
-            if (columnMap.distYield >= 0 && columnMap.distYield < values.length) {
-              const yieldStr = values[columnMap.distYield].replace(/[%,"\s]/g, '');
-              dividendYield = parseFloat(yieldStr) || 0;
-            }
-            
-            // Parse estimated annual income
-            let dividendAmount = 0;
-            if (columnMap.estAnnualIncome >= 0 && columnMap.estAnnualIncome < values.length) {
-              const incomeStr = values[columnMap.estAnnualIncome].replace(/[$,"\s]/g, '');
-              dividendAmount = parseFloat(incomeStr) || 0;
-            } else if (dividendYield > 0) {
-              // Calculate from yield if we have it
-              dividendAmount = (dividendYield / 100) * currentValue;
-            }
-            
-            // Determine asset class based on description or symbol
-            let assetClass: 'Stocks' | 'Funds' | 'Cash' | 'Commodities' | 'Other' = 'Stocks';
-            const desc = name.toLowerCase();
-            
-            if (desc.includes('etf') || 
-                desc.includes('fund') || 
-                desc.includes('index') || 
-                symbol.includes('voo') || 
-                symbol.includes('spy') || 
-                symbol.includes('vti')) {
-              assetClass = 'Funds';
-            } else if (desc.includes('gold') || 
-                      desc.includes('silver') || 
-                      desc.includes('platinum') || 
-                      symbol === 'gld' || 
-                      symbol === 'slv') {
-              assetClass = 'Commodities';
-            } else if (desc.includes('cash') || 
-                      desc.includes('money market') || 
-                      symbol.includes('cash')) {
-              assetClass = 'Cash';
-            }
-            
-            // Calculate annual income from dividend yield
-            const annualIncome = dividendYield > 0 ? (dividendYield / 100) * currentValue : dividendAmount;
-            
-            // Create holding object
-            const holding: Holding = {
-              id: `holding-${symbol}-${i}`,
-              symbol,
-              name,
-              shares,
-              costPerShare,
-              costBasis,
-              currentValue,
-              currentPrice,
-              gain: currentValue - costBasis,
-              gainPercent: costBasis > 0 ? ((currentValue - costBasis) / costBasis) * 100 : 0,
-              dividendYield,
-              dividendAmount,
-              dividendFrequency: 'quarterly', // Default assumption
-              dividendGrowth: 0, // Would need historical data
-              sector: 'Other', // Would need sector data
-              assetClass,
-              allocation: 0, // Calculate after processing all holdings
-              irr: 0, // Would need transaction history
-              shareInPortfolio: 0, // Calculate after processing all holdings
-              annualIncome // Add the calculated annual income
-            };
-            
-            holdings.push(holding);
-            console.log(`Added holding ${symbol} with value ${currentValue}`);
-            
-            // Check if we have dividend details
-            if (columnMap.amountPerShare >= 0 && columnMap.amountPerShare < values.length &&
-                columnMap.payDate >= 0 && columnMap.payDate < values.length) {
-                
-              const amountPerShareStr = values[columnMap.amountPerShare].replace(/[$,"\s]/g, '');
-              const amountPerShare = parseFloat(amountPerShareStr) || 0;
-              
-              if (amountPerShare > 0) {
-                const payDateStr = values[columnMap.payDate].trim();
-                let payDate = new Date().toISOString().split('T')[0]; // Default to today
-                
-                // Try to parse the pay date
-                if (payDateStr && payDateStr !== "N/A" && payDateStr !== "--") {
-                  try {
-                    // Try different date formats
-                    let dateObj: Date | null = null;
-                    
-                    // Try MM/DD/YYYY
-                    if (payDateStr.includes('/')) {
-                      const parts = payDateStr.split('/');
-                      if (parts.length === 3) {
-                        dateObj = new Date(parseInt(parts[2]), parseInt(parts[0]) - 1, parseInt(parts[1]));
-                      }
-                    } 
-                    // Try YYYY-MM-DD
-                    else if (payDateStr.includes('-')) {
-                      dateObj = new Date(payDateStr);
-                    }
-                    
-                    if (dateObj && !isNaN(dateObj.getTime())) {
-                      payDate = dateObj.toISOString().split('T')[0];
-                    }
-                  } catch (e) {
-                    console.warn(`Could not parse pay date: ${payDateStr}`);
-                  }
-                }
-                
-                // Calculate dividend amount
-                const amount = amountPerShare * shares;
-                
-                const dividend: DividendPayment = {
-                  id: `dividend-${symbol}-${payDate}`,
-                  holdingId: holding.id,
-                  symbol,
-                  companyName: name,
-                  date: payDate,
-                  amount,
-                  amountPerShare,
-                  shares,
-                  tax: 0, // No tax info in the CSV
-                  currency: 'USD'
-                };
-                
-                dividends.push(dividend);
-                console.log(`Added dividend for ${symbol} on ${payDate}: $${amount}`);
-                
-                // Add as transaction too
-                const transaction: Transaction = {
-                  id: `transaction-${symbol}-${payDate}`,
-                  date: payDate,
-                  type: 'dividend',
-                  symbol,
-                  companyName: name,
-                  shares: 0,
-                  price: 0,
-                  amount,
-                  fees: 0,
-                  tax: 0,
-                  currency: 'USD',
-                  notes: 'Dividend payment'
-                };
-                
-                transactions.push(transaction);
-              }
-            }
-          }
-          
-          // If portfolio value is 0, use a default value
-          if (totalPortfolioValue <= 0) {
-            totalPortfolioValue = 1; // To avoid division by zero
-          }
-          
-          // Calculate allocation percentages
-          holdings.forEach(holding => {
-            holding.allocation = (holding.currentValue / totalPortfolioValue) * 100;
-            holding.shareInPortfolio = (holding.currentValue / totalPortfolioValue) * 100;
-          });
-          
-          console.log("Parsing complete:", {
-            holdings: holdings.length,
-            dividends: dividends.length,
-            transactions: transactions.length,
-            totalPortfolioValue
-          });
-          
-          if (holdings.length === 0) {
-            console.warn("No holdings found in the CSV. Creating a placeholder.");
-            // Create a placeholder holding if none were found
-            holdings.push({
-              id: 'placeholder',
-              symbol: 'PLACEHOLDER',
-              name: 'CSV could not be properly parsed',
-              shares: 1,
-              costPerShare: 100,
-              costBasis: 100,
-              currentValue: 100,
-              currentPrice: 100,
-              gain: 0,
-              gainPercent: 0,
-              dividendYield: 0,
-              dividendAmount: 0,
-              dividendFrequency: 'quarterly',
-              dividendGrowth: 0,
-              sector: 'Other',
-              assetClass: 'Other',
-              allocation: 100,
-              irr: 0,
-              shareInPortfolio: 100,
-              annualIncome: 0 // Add annual income to the placeholder
+          if (totalValue > 0) {
+            holdings.forEach(holding => {
+              holding.allocation = (holding.currentValue / totalValue) * 100;
+              holding.shareInPortfolio = (holding.currentValue / totalValue) * 100;
             });
           }
           
+          // Sort by value (descending)
+          holdings.sort((a, b) => b.currentValue - a.currentValue);
+          
           resolve({
-            holdings,
-            dividends,
-            transactions
+            success: true,
+            fileType: 'holdings',
+            holdings
           });
-        } catch (error) {
-          console.error("CSV parsing error:", error);
-          reject(error);
+        } else {
+          console.warn("No holdings found in the CSV. Creating a placeholder.");
+          // Create a placeholder holding if none were found
+          holdings.push({
+            id: 'placeholder',
+            symbol: 'PLACEHOLDER',
+            name: 'CSV could not be properly parsed',
+            shares: 1,
+            costPerShare: 100,
+            costBasis: 100,
+            totalCost: 100, // Add the missing totalCost property
+            currentValue: 100,
+            currentPrice: 100,
+            gain: 0,
+            gainPercent: 0,
+            dividendYield: 0,
+            dividendAmount: 0,
+            dividendFrequency: 'quarterly',
+            dividendGrowth: 0,
+            sector: 'Other',
+            assetClass: 'Other',
+            allocation: 100,
+            irr: 0,
+            shareInPortfolio: 100,
+            annualIncome: 0 // Add annual income to the placeholder
+          });
+          
+          resolve({
+            success: true,
+            fileType: 'holdings',
+            holdings,
+            error: "No valid holdings found in CSV. Created a placeholder."
+          });
         }
-      };
-      
-      reader.onerror = () => {
-        reject(new Error('Failed to read file'));
-      };
-      
-      reader.readAsText(file);
-    });
-  };
+      } else {
+        // Is a transactions file - this is just a placeholder for transaction parsing
+        resolve({
+          success: true,
+          fileType: 'transactions',
+          transactions: []
+        });
+      }
+    } catch (error) {
+      console.error("Error parsing CSV:", error);
+      reject({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error parsing CSV" 
+      });
+    }
+  });
+};
+
+// Function to detect if CSV contains holdings data
+function detectHoldingsCSV(headers: string[]): boolean {
+  const holdingsKeywords = ['symbol', 'ticker', 'shares', 'quantity', 'price', 'value', 'cost'];
+  return containsKeywords(headers, holdingsKeywords);
+}
+
+// Function to detect if CSV contains transaction data
+function detectTransactionsCSV(headers: string[]): boolean {
+  const transactionKeywords = ['date', 'transaction', 'type', 'action', 'buy', 'sell'];
+  return containsKeywords(headers, transactionKeywords);
+}
+
+// Check if headers contain any of the keywords
+function containsKeywords(headers: string[], keywords: string[]): boolean {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return lowerHeaders.some(header => 
+    keywords.some(keyword => header.includes(keyword))
+  );
+}
+
+// Find index of column that matches any of the possible names
+function findHeaderIndex(headers: string[], possibleNames: string[]): number {
+  const lowerHeaders = headers.map(h => h.toLowerCase());
+  return lowerHeaders.findIndex(header => 
+    possibleNames.some(name => header.includes(name))
+  );
+}
+
+// Parse a CSV line respecting quoted values
+function parseCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let inQuotes = false;
+  let currentValue = '';
   
-  // For compatibility
-  export const parsePortfolioCSV = parseCSV;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      // End of cell
+      result.push(currentValue);
+      currentValue = '';
+    } else {
+      currentValue += char;
+    }
+  }
   
-  /**
-   * Parse a CSV using Claude API for more robust handling
-   * This is a stub - we'll implement this with Claude API integration
-   */
-  export const parseCSVWithClaude = async (file: File, apiKey: string): Promise<{
-    holdings: Holding[];
-    dividends: DividendPayment[];
-    transactions: Transaction[];
-  }> => {
-    // This would be implemented with Claude API integration
-    // For now, fall back to the standard parser
-    console.log("Claude API parsing not yet implemented, using standard parser");
-    return parseCSV(file);
-  };
+  // Add the last value
+  result.push(currentValue);
+  
+  return result;
+}
+
+// Map asset class to standardized categories
+function mapAssetClass(assetClass: string): string {
+  const lowercase = assetClass.toLowerCase();
+  
+  if (lowercase.includes('stock') || lowercase.includes('equity')) {
+    return 'Stocks';
+  } else if (lowercase.includes('bond')) {
+    return 'Bonds';
+  } else if (lowercase.includes('etf') || lowercase.includes('fund')) {
+    return 'ETFs';
+  } else if (lowercase.includes('reit') || lowercase.includes('real estate')) {
+    return 'Real Estate';
+  } else if (lowercase.includes('cash') || lowercase.includes('money market')) {
+    return 'Cash';
+  } else if (lowercase.includes('crypto')) {
+    return 'Crypto';
+  } else if (lowercase.includes('commodity') || lowercase.includes('gold')) {
+    return 'Commodities';
+  } else {
+    return 'Other';
+  }
+}
+
+export default parseCSV;

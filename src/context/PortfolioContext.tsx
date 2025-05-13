@@ -42,8 +42,10 @@ export const PortfolioProvider: React.FC<PortfolioProviderProps> = ({ children }
   useEffect(() => {
     try {
       setIsLoading(true);
-      const storedHoldings = localStorage.getItem('holdings');
-      const storedTransactions = localStorage.getItem('transactions');
+      
+      // Check for data in both storage key formats
+      const storedHoldings = localStorage.getItem('holdings') || localStorage.getItem('portfolio-holdings');
+      const storedTransactions = localStorage.getItem('transactions') || localStorage.getItem('portfolio-transactions');
       
       if (storedHoldings) {
         setHoldings(JSON.parse(storedHoldings));
@@ -65,20 +67,35 @@ export const PortfolioProvider: React.FC<PortfolioProviderProps> = ({ children }
   useEffect(() => {
     if (holdings.length > 0) {
       localStorage.setItem('holdings', JSON.stringify(holdings));
+      localStorage.setItem('portfolio-holdings', JSON.stringify(holdings));
     }
     
     if (transactions.length > 0) {
       localStorage.setItem('transactions', JSON.stringify(transactions));
+      localStorage.setItem('portfolio-transactions', JSON.stringify(transactions));
     }
   }, [holdings, transactions]);
+
+  // Handle setting holdings with proper state update
+  const updateHoldings = (newHoldings: Holding[]) => {
+    setHoldings(newHoldings);
+  };
+  
+  // Handle setting transactions with proper state update
+  const updateTransactions = (newTransactions: Transaction[]) => {
+    setTransactions(newTransactions);
+  };
 
   // Clear all data
   const clearData = () => {
     setHoldings([]);
     setTransactions([]);
     
+    // Clear all possible storage keys to avoid confusion
     localStorage.removeItem('holdings');
     localStorage.removeItem('transactions');
+    localStorage.removeItem('portfolio-holdings');
+    localStorage.removeItem('portfolio-transactions');
   };
 
   const value = {
@@ -86,8 +103,8 @@ export const PortfolioProvider: React.FC<PortfolioProviderProps> = ({ children }
     transactions,
     isLoading,
     error,
-    setHoldings,
-    setTransactions,
+    setHoldings: updateHoldings,
+    setTransactions: updateTransactions,
     clearData
   };
 
