@@ -1,20 +1,26 @@
+// src/components/dashboard/DividendProjection.tsx
 import React from 'react';
 import Card from '../ui/Card';
 import usePortfolio from '../../hooks/usePortfolio';
 import { formatCurrency } from '../../utils/formatters';
+import { TimeFilterProps } from '../../types/dashboard';
 
 interface MonthProjection {
   month: string;
   total: number;
 }
 
-const DividendProjection: React.FC = () => {
+const DividendProjection: React.FC<TimeFilterProps> = ({
+  periodIncome
+}) => {
   const { monthlyIncome } = usePortfolio();
   // Type assertion to match the correct structure
   const dividendProjections = monthlyIncome as MonthProjection[];
   
   // Calculate total projected dividends
-  const totalProjected = dividendProjections?.reduce((sum: number, month: MonthProjection) => sum + month.total, 0) || 0;
+  const totalProjected = periodIncome !== undefined 
+    ? periodIncome 
+    : (dividendProjections?.reduce((sum: number, month: MonthProjection) => sum + month.total, 0) || 0);
   
   // Calculate average monthly income
   const averageMonthly = dividendProjections && dividendProjections.length > 0
@@ -31,13 +37,13 @@ const DividendProjection: React.FC = () => {
         
         <div className="grid grid-cols-2 gap-4 mb-6">
           <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Annual Income</div>
+            <div className="text-sm text-gray-500 dark:text-white">Annual Income</div>
             <div className="text-xl font-semibold text-green-600 dark:text-green-400">
               {formatCurrency(totalProjected)}
             </div>
           </div>
           <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Monthly Average</div>
+            <div className="text-sm text-gray-500 dark:text-white">Monthly Average</div>
             <div className="text-xl font-semibold text-green-600 dark:text-green-400">
               {formatCurrency(averageMonthly)}
             </div>
@@ -45,7 +51,7 @@ const DividendProjection: React.FC = () => {
         </div>
         
         <div className="flex-1">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+          <div className="text-sm font-medium text-gray-700 dark:text-white mb-2">
             Monthly Distribution
           </div>
           <div className="relative h-16 bg-gray-100 dark:bg-gray-700 rounded">

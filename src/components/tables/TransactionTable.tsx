@@ -1,5 +1,5 @@
-// src/components/tables/TransactionTable.tsx 
-// Add the correct type imports and fix the type annotations
+// src/components/tables/TransactionTable.tsx
+// Updated version with improved styling for dark mode
 
 import React, { useState, useEffect } from 'react';
 import usePortfolio from '../../hooks/usePortfolio';
@@ -14,6 +14,7 @@ interface SortableHeaderProps {
   currentDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
   children: React.ReactNode;
+  align?: 'left' | 'right';
 }
 
 const SortableHeader: React.FC<SortableHeaderProps> = ({ 
@@ -21,17 +22,18 @@ const SortableHeader: React.FC<SortableHeaderProps> = ({
   currentSort, 
   currentDirection, 
   onSort, 
-  children 
+  children,
+  align = 'left'
 }) => {
   return (
     <th
-      className="px-4 py-2 text-left cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700"
+      className={`px-4 py-2 text-${align} cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600`}
       onClick={() => onSort(field)}
     >
-      <div className="flex items-center">
-        {children}
+      <div className={`flex items-center ${align === 'right' ? 'justify-end' : ''}`}>
+        <span className="text-gray-700 dark:text-white">{children}</span>
         {currentSort === field && (
-          <span className="ml-1">
+          <span className="ml-1 text-blue-500 dark:text-blue-400">
             {currentDirection === 'asc' ? '↑' : '↓'}
           </span>
         )}
@@ -172,42 +174,42 @@ const TransactionTable: React.FC = () => {
     <Card>
       <div className="mb-4">
         <h2 className="text-lg font-medium text-gray-800 dark:text-white">Transactions</h2>
-        <p className="text-sm text-gray-500 dark:text-gray-400">
+        <p className="text-sm text-gray-500 dark:text-white">
           {filteredTransactions.length} transactions
         </p>
       </div>
       
       <div className="mb-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
             From Date
           </label>
           <input
             type="date"
             value={dateFilter.start || ''}
             onChange={(e) => setDateFilter({ ...dateFilter, start: e.target.value })}
-            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md p-2 w-full"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md p-2 w-full"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
             To Date
           </label>
           <input
             type="date"
             value={dateFilter.end || ''}
             onChange={(e) => setDateFilter({ ...dateFilter, end: e.target.value })}
-            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md p-2 w-full"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md p-2 w-full"
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
             Transaction Type
           </label>
           <select
             value={typeFilter}
             onChange={(e) => setTypeFilter(e.target.value)}
-            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md p-2 w-full"
+            className="border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md p-2 w-full"
           >
             <option value="all">All Types</option>
             <option value="buy">Buy</option>
@@ -219,7 +221,7 @@ const TransactionTable: React.FC = () => {
           </select>
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+          <label className="block text-sm font-medium text-gray-700 dark:text-white mb-1">
             Reset Filters
           </label>
           <button
@@ -227,7 +229,7 @@ const TransactionTable: React.FC = () => {
               setDateFilter({});
               setTypeFilter('all');
             }}
-            className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 px-4 py-2 rounded-md w-full hover:bg-gray-300 dark:hover:bg-gray-600"
+            className="bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-white px-4 py-2 rounded-md w-full hover:bg-gray-300 dark:hover:bg-gray-600"
           >
             Clear Filters
           </button>
@@ -236,19 +238,19 @@ const TransactionTable: React.FC = () => {
       
       <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Buys / Sells</div>
+          <div className="text-sm text-gray-500 dark:text-white">Buys / Sells</div>
           <div className="text-lg font-semibold text-gray-800 dark:text-white">
             {formatCurrency(summaryStats.totalBuy)} / {formatCurrency(summaryStats.totalSell)}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Dividends</div>
+          <div className="text-sm text-gray-500 dark:text-white">Dividends</div>
           <div className="text-lg font-semibold text-green-600 dark:text-green-400">
             {formatCurrency(summaryStats.totalDividends)}
           </div>
         </div>
         <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-          <div className="text-sm text-gray-500 dark:text-gray-400">Fees & Taxes</div>
+          <div className="text-sm text-gray-500 dark:text-white">Fees & Taxes</div>
           <div className="text-lg font-semibold text-red-600 dark:text-red-400">
             {formatCurrency(summaryStats.totalFees + summaryStats.totalTaxes)}
           </div>
@@ -283,12 +285,13 @@ const TransactionTable: React.FC = () => {
               >
                 Symbol
               </SortableHeader>
-              <th className="px-4 py-2 text-left">Description</th>
+              <th className="px-4 py-2 text-left text-gray-700 dark:text-white">Description</th>
               <SortableHeader
                 field="shares"
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
+                align="right"
               >
                 Shares
               </SortableHeader>
@@ -297,6 +300,7 @@ const TransactionTable: React.FC = () => {
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
+                align="right"
               >
                 Price
               </SortableHeader>
@@ -305,10 +309,11 @@ const TransactionTable: React.FC = () => {
                 currentSort={sortField}
                 currentDirection={sortDirection}
                 onSort={handleSort}
+                align="right"
               >
                 Amount
               </SortableHeader>
-              <th className="px-4 py-2 text-left">Fees</th>
+              <th className="px-4 py-2 text-right text-gray-700 dark:text-white">Fees</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
@@ -318,28 +323,28 @@ const TransactionTable: React.FC = () => {
                   key={transaction.id}
                   className="hover:bg-gray-50 dark:hover:bg-gray-800"
                 >
-                  <td className="px-4 py-2 whitespace-nowrap">
+                  <td className="px-4 py-2 whitespace-nowrap text-gray-700 dark:text-gray-300">
                     {formatDate(transaction.date)}
                   </td>
                   <td className="px-4 py-2 whitespace-nowrap">
                     {getTypeBadge(transaction.type)}
                   </td>
-                  <td className="px-4 py-2 whitespace-nowrap font-medium">
+                  <td className="px-4 py-2 whitespace-nowrap font-medium text-gray-900 dark:text-white">
                     {transaction.symbol}
                   </td>
-                  <td className="px-4 py-2 max-w-xs truncate">
+                  <td className="px-4 py-2 max-w-xs truncate text-gray-700 dark:text-gray-300">
                     {transaction.companyName}
                   </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right">
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-gray-700 dark:text-gray-300">
                     {transaction.shares > 0 ? transaction.shares.toFixed(2) : ''}
                   </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right">
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-gray-700 dark:text-gray-300">
                     {transaction.price > 0 ? formatCurrency(transaction.price) : ''}
                   </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right font-medium">
+                  <td className="px-4 py-2 whitespace-nowrap text-right font-medium text-gray-900 dark:text-white">
                     {formatCurrency(transaction.amount)}
                   </td>
-                  <td className="px-4 py-2 whitespace-nowrap text-right text-gray-500">
+                  <td className="px-4 py-2 whitespace-nowrap text-right text-gray-500 dark:text-gray-300">
                     {transaction.fees ? formatCurrency(transaction.fees) : ''}
                   </td>
                 </tr>

@@ -1,7 +1,9 @@
+// src/components/dashboard/PortfolioSummary.tsx
 import React from 'react';
 import Card from '../ui/Card';
 import usePortfolio from '../../hooks/usePortfolio';
 import { formatCurrency, formatPercentage } from '../../utils/formatters';
+import { TimeFilterProps } from '../../types/dashboard';
 
 // Define local interfaces for our metrics
 interface MetricsResult {
@@ -17,12 +19,20 @@ interface MetricsResult {
   topLoser: { symbol: string; gainPercent: number };
 }
 
-const PortfolioSummary: React.FC = () => {
+const PortfolioSummary: React.FC<TimeFilterProps> = ({
+  filteredHoldings,
+  periodIncome,
+  periodGain
+}) => {
   const { holdings, portfolioValue, portfolioIncome, portfolioYield } = usePortfolio();
+  
+  // Use filtered data if available
+  const displayHoldings = filteredHoldings || holdings;
+  const displayIncome = periodIncome !== undefined ? periodIncome : portfolioIncome;
   
   // Calculate portfolio metrics
   const calculateMetrics = (): MetricsResult => {
-    if (!holdings || holdings.length === 0) {
+    if (!displayHoldings || displayHoldings.length === 0) {
       return {
         totalValue: 0,
         totalCost: 0,
@@ -37,18 +47,15 @@ const PortfolioSummary: React.FC = () => {
       };
     }
     
-    // Cast the holdings to any to avoid the type mismatch
-    const typedHoldings = holdings as any[];
-    
-    const totalValue = typedHoldings.reduce((sum, h) => sum + h.currentValue, 0);
-    const totalCost = typedHoldings.reduce((sum, h) => sum + h.costBasis, 0);
-    const totalGain = totalValue - totalCost;
+    const totalValue = displayHoldings.reduce((sum, h) => sum + h.currentValue, 0);
+    const totalCost = displayHoldings.reduce((sum, h) => sum + h.costBasis, 0);
+    const totalGain = periodGain !== undefined ? periodGain : (totalValue - totalCost);
     const totalGainPercent = (totalCost > 0) ? (totalGain / totalCost) * 100 : 0;
-    const totalIncome = typedHoldings.reduce((sum, h) => sum + h.annualIncome, 0);
+    const totalIncome = displayIncome;
     const totalYield = (totalValue > 0) ? (totalIncome / totalValue) * 100 : 0;
     
     // Find top and bottom performers
-    const holdingsWithYield = typedHoldings.filter(h => h.dividendYield > 0);
+    const holdingsWithYield = displayHoldings.filter(h => h.dividendYield > 0);
     
     // Default values in case of empty arrays
     let highestYield = { symbol: 'N/A', dividendYield: 0 };
@@ -76,12 +83,12 @@ const PortfolioSummary: React.FC = () => {
       };
     }
     
-    if (typedHoldings.length > 0) {
-      const topGainHolding = typedHoldings.reduce((prev, current) => 
+    if (displayHoldings.length > 0) {
+      const topGainHolding = displayHoldings.reduce((prev, current) => 
         prev.gainPercent > current.gainPercent ? prev : current
       );
       
-      const topLossHolding = typedHoldings.reduce((prev, current) => 
+      const topLossHolding = displayHoldings.reduce((prev, current) => 
         prev.gainPercent < current.gainPercent ? prev : current
       );
       
@@ -113,88 +120,86 @@ const PortfolioSummary: React.FC = () => {
   const metrics = calculateMetrics();
   
   return (
-    <Card>
-      <div className="flex flex-col h-full">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-medium text-gray-800 dark:text-white">Portfolio Overview</h2>
-          <span className={`text-sm font-medium px-2.5 py-0.5 rounded-full ${
+    <div className="flex flex-col h-full">
+      <div className="flex justify-between items-center mb-4">
+        <h2 className="text-lg font-medium text-white">Portfolio Overview</h2>
+        <span className={`text-sm font-medium px-2.5 py-0.5 rounded-full ${
+          metrics.totalGain >= 0
+            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
+            : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+        }`}>
+          {formatPercentage(metrics.totalGainPercent)}
+        </span>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        <div>
+          <div className="text-sm text-white">Total Value</div>
+          <div className="text-xl font-semibold text-white">
+            {formatCurrency(metrics.totalValue)}
+          </div>
+        </div>
+        <div>
+          <div className="text-sm text-white">Annual Income</div>
+          <div className="text-xl font-semibold text-green-400">
+            {formatCurrency(metrics.totalIncome)}
+          </div>
+        </div>
+        <div>
+          <div className="text-sm text-white">Total Gain/Loss</div>
+          <div className={`text-xl font-semibold ${
             metrics.totalGain >= 0
-              ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300'
-              : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'
+              ? 'text-green-400'
+              : 'text-red-400'
           }`}>
-            {formatPercentage(metrics.totalGainPercent)}
-          </span>
+            {formatCurrency(metrics.totalGain)}
+          </div>
         </div>
-        
-        <div className="grid grid-cols-2 gap-4 mb-6">
-          <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Total Value</div>
-            <div className="text-xl font-semibold text-gray-800 dark:text-white">
-              {formatCurrency(portfolioValue)}
-            </div>
+        <div>
+          <div className="text-sm text-white">Portfolio Yield</div>
+          <div className="text-xl font-semibold text-blue-400">
+            {formatPercentage(metrics.totalYield)}
           </div>
-          <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Annual Income</div>
-            <div className="text-xl font-semibold text-green-600 dark:text-green-400">
-              {formatCurrency(portfolioIncome)}
+        </div>
+      </div>
+      
+      <div className="grid grid-cols-2 gap-4">
+        <div className="bg-gray-800 p-3 rounded">
+          <div className="text-sm font-medium text-white mb-2">Top Performers</div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-300">Highest Yield</span>
+              <span className="text-sm font-medium text-green-400">
+                {metrics.highestYield.symbol} ({formatPercentage(metrics.highestYield.dividendYield)})
+              </span>
             </div>
-          </div>
-          <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Total Gain/Loss</div>
-            <div className={`text-xl font-semibold ${
-              metrics.totalGain >= 0
-                ? 'text-green-600 dark:text-green-400'
-                : 'text-red-600 dark:text-red-400'
-            }`}>
-              {formatCurrency(metrics.totalGain)}
-            </div>
-          </div>
-          <div>
-            <div className="text-sm text-gray-500 dark:text-gray-400">Portfolio Yield</div>
-            <div className="text-xl font-semibold text-blue-600 dark:text-blue-400">
-              {formatPercentage(portfolioYield)}
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-300">Best Gainer</span>
+              <span className="text-sm font-medium text-green-400">
+                {metrics.topGainer.symbol} ({formatPercentage(metrics.topGainer.gainPercent)})
+              </span>
             </div>
           </div>
         </div>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Top Performers</div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Highest Yield</span>
-                <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                  {metrics.highestYield.symbol} ({formatPercentage(metrics.highestYield.dividendYield)})
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Best Gainer</span>
-                <span className="text-sm font-medium text-green-600 dark:text-green-400">
-                  {metrics.topGainer.symbol} ({formatPercentage(metrics.topGainer.gainPercent)})
-                </span>
-              </div>
+        <div className="bg-gray-800 p-3 rounded">
+          <div className="text-sm font-medium text-white mb-2">Bottom Performers</div>
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-300">Lowest Yield</span>
+              <span className="text-sm font-medium text-red-400">
+                {metrics.lowestYield.symbol} ({formatPercentage(metrics.lowestYield.dividendYield)})
+              </span>
             </div>
-          </div>
-          <div className="bg-gray-50 dark:bg-gray-700 p-3 rounded">
-            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Bottom Performers</div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Lowest Yield</span>
-                <span className="text-sm font-medium text-red-600 dark:text-red-400">
-                  {metrics.lowestYield.symbol} ({formatPercentage(metrics.lowestYield.dividendYield)})
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-gray-500 dark:text-gray-400">Worst Performer</span>
-                <span className="text-sm font-medium text-red-600 dark:text-red-400">
-                  {metrics.topLoser.symbol} ({formatPercentage(metrics.topLoser.gainPercent)})
-                </span>
-              </div>
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-gray-300">Worst Performer</span>
+              <span className="text-sm font-medium text-red-400">
+                {metrics.topLoser.symbol} ({formatPercentage(metrics.topLoser.gainPercent)})
+              </span>
             </div>
           </div>
         </div>
       </div>
-    </Card>
+    </div>
   );
 };
 
